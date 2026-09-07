@@ -27,25 +27,7 @@ export function useDoctorsPresence() {
     try {
       setLoading(true);
 
-      // 1. Primary approach: Fetch from Express backend API
-      try {
-        const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
-        const response = await fetch(`${API_URL}/api/doctors`);
-
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success && Array.isArray(result.doctors)) {
-            console.log("[Doctors Hook] Loaded live doctors from Express API:", result.doctors);
-            setDoctorsList(result.doctors);
-            setLoading(false);
-            return;
-          }
-        }
-      } catch (apiErr) {
-        console.warn("[Doctors Hook] Backend API call failed, using Supabase fallback...");
-      }
-
-      // 2. Fallback: Fetch directly from Supabase staff_accounts
+      // Fetch directly from Supabase staff_accounts (Express /api/doctors doesn't exist)
       const { data, error } = await supabase
         .from("staff_accounts")
         .select("id, display_name, username, role, is_active, is_online, last_seen")
@@ -54,13 +36,14 @@ export function useDoctorsPresence() {
         .order("created_at", { ascending: true });
 
       if (error) {
-        console.error("Database error fetching doctors from Supabase:", error);
+        console.error("[Doctors] Supabase error:", error);
+        setDoctorsList([]);
+        return;
       }
 
       if (data && data.length > 0) {
         const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
         const doctorsFromDB = data.map((doc: any, i: number) => {
-          // Use localStorage metadata (set when admin creates/edits doctor)
           const meta = getDoctorMetadata(doc.username);
           const rawExp = meta?.experience;
           let expVal = rawExp;
@@ -74,7 +57,6 @@ export function useDoctorsPresence() {
               }
             }
           }
-
           return {
             id: doc.id.toString(),
             username: doc.username,
@@ -88,13 +70,12 @@ export function useDoctorsPresence() {
             lastSeen: doc.last_seen,
           };
         });
-
         setDoctorsList(doctorsFromDB);
       } else {
         setDoctorsList([]);
       }
     } catch (err) {
-      console.error("Error fetching doctors:", err);
+      console.error("[Doctors] Fetch error:", err);
       setDoctorsList([]);
     } finally {
       setLoading(false);
