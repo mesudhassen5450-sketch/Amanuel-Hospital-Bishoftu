@@ -1,6 +1,6 @@
 import { apiFetch, handleApiResponse } from "./client";
 import { supabase } from "../supabase";
-import { setDoctorMetadata, getDoctorMetadata, isStaffDeletedLocally, markStaffAsDeletedLocally, removeDoctorMetadata } from "../doctor-metadata";
+import { setDoctorMetadata, getDoctorMetadata, isStaffDeletedLocally, markStaffAsDeletedLocally, unmarkStaffAsDeletedLocally, removeDoctorMetadata } from "../doctor-metadata";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // STAFF ACCOUNT TYPES
@@ -110,6 +110,8 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
 export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAccount> => {
   const roleUpper = data.role.toUpperCase();
   const cleanUsername = data.username.toLowerCase().trim();
+
+  unmarkStaffAsDeletedLocally(cleanUsername);
 
   if (data.specialty || data.experience || data.bio) {
     setDoctorMetadata(cleanUsername, {

@@ -25,6 +25,7 @@ export function setDoctorMetadata(username: string, metadata: DoctorMetadata): v
     };
 
     localStorage.setItem(`${STORAGE_PREFIX}${cleanUsername}`, JSON.stringify(updated));
+    unmarkStaffAsDeletedLocally(cleanUsername);
 
     // Update global map
     const allRaw = localStorage.getItem(ALL_META_KEY);
@@ -71,6 +72,25 @@ export function removeDoctorMetadata(username: string): void {
 }
 
 const DELETED_STAFF_KEY = "deleted_staff_accounts";
+
+export function unmarkStaffAsDeletedLocally(username?: string, id?: string | number): void {
+  try {
+    const raw = localStorage.getItem(DELETED_STAFF_KEY);
+    if (!raw) return;
+    let list: string[] = JSON.parse(raw);
+    if (username) {
+      const uStr = username.toLowerCase().trim();
+      list = list.filter((item) => item !== uStr);
+    }
+    if (id !== undefined && id !== null) {
+      const idStr = String(id).trim();
+      list = list.filter((item) => item !== idStr);
+    }
+    localStorage.setItem(DELETED_STAFF_KEY, JSON.stringify(list));
+  } catch (err) {
+    console.warn("Failed to unmark staff as deleted locally:", err);
+  }
+}
 
 export function markStaffAsDeletedLocally(id: string | number, username?: string): void {
   try {
