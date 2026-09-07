@@ -82,6 +82,9 @@ type StaffAccount = {
   lastSeen: string | null;
   createdAt: string;
   updatedAt: string;
+  specialty?: string;
+  experience?: string;
+  bio?: string;
 };
 
 function AdminDashboardPage() {
@@ -109,6 +112,9 @@ function AdminDashboardPage() {
     displayName: "",
     role: "",
     isActive: true,
+    specialty: "",
+    experience: "",
+    bio: "",
   });
   const [resetPasswordForm, setResetPasswordForm] = useState({
     newPassword: "",
@@ -180,6 +186,9 @@ function AdminDashboardPage() {
       displayName: staff.displayName || "",
       role: staff.role,
       isActive: staff.isActive,
+      specialty: staff.specialty || "",
+      experience: staff.experience || "",
+      bio: staff.bio || "",
     });
     setEditDialogOpen(true);
   };
@@ -193,6 +202,9 @@ function AdminDashboardPage() {
         role: editForm.role,
         displayName: editForm.displayName,
         isActive: editForm.isActive,
+        specialty: editForm.role.toLowerCase() === 'doctor' ? editForm.specialty : undefined,
+        experience: editForm.role.toLowerCase() === 'doctor' ? editForm.experience : undefined,
+        bio: editForm.role.toLowerCase() === 'doctor' ? editForm.bio : undefined,
       });
       toast.success("Staff account updated successfully");
       setEditDialogOpen(false);
@@ -804,6 +816,45 @@ function AdminDashboardPage() {
                   Active Account (Allowed to sign in)
                 </Label>
               </div>
+
+              {/* Doctor-specific fields */}
+              {editForm.role.toLowerCase() === 'doctor' && (
+                <div className="p-3 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900 rounded-xl space-y-3 mt-2">
+                  <p className="text-xs font-bold text-blue-600 dark:text-blue-400">
+                    Doctor Profile (Shown on Public Doctor Page)
+                  </p>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-specialty" className="text-xs font-semibold">Medical Specialty</Label>
+                    <input
+                      id="edit-specialty"
+                      value={editForm.specialty}
+                      onChange={(e) => setEditForm({ ...editForm, specialty: e.target.value })}
+                      placeholder="e.g. Cardiologist, General Practice"
+                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-experience" className="text-xs font-semibold">Years of Experience</Label>
+                    <input
+                      id="edit-experience"
+                      value={editForm.experience}
+                      onChange={(e) => setEditForm({ ...editForm, experience: e.target.value })}
+                      placeholder="e.g. 10+ years"
+                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="edit-bio" className="text-xs font-semibold">Bio / Summary</Label>
+                    <input
+                      id="edit-bio"
+                      value={editForm.bio}
+                      onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
+                      placeholder="Brief description of expertise..."
+                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
             <DialogFooter className="pt-2">
               <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="rounded-xl text-xs">

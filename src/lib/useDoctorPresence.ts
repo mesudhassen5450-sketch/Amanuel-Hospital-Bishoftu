@@ -53,18 +53,37 @@ export function useDoctorsPresence() {
         .eq("is_active", true)
         .order("created_at", { ascending: true });
 
+      if (error) {
+        console.error("Database error fetching doctors from Supabase:", error);
+      }
+
+      // Fetch doctor profiles from the doctors table
+      let doctorProfiles: Record<string, any> = {};
+      try {
+        const { data: docData } = await supabase
+          .from("doctors")
+          .select("username, specialty, experience, bio");
+        if (docData) {
+          for (const d of docData) {
+            doctorProfiles[d.username?.toLowerCase()] = d;
+          }
+        }
+      } catch {}
+
       if (data && data.length > 0) {
         const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
         const doctorsFromDB = data.map((doc: any, i: number) => {
           const meta = getDoctorMetadata(doc.username);
-          let rawExp = meta?.experience || doc.experience;
+          const docProfile = doctorProfiles[doc.username?.toLowerCase()];
+          // Priority: doctors table > localStorage metadata > default
+          const rawExp = docProfile?.experience || meta?.experience;
           let expVal = rawExp;
           if (expVal) {
             if (typeof expVal === "number") {
               expVal = `${expVal}+ years experience`;
             } else {
               expVal = String(expVal).trim();
-              if (!expVal.toLowerCase().includes("year")) {
+              if (expVal && !expVal.toLowerCase().includes("year")) {
                 expVal = `${expVal} years experience`;
               }
             }
@@ -74,9 +93,9 @@ export function useDoctorsPresence() {
             id: doc.id.toString(),
             username: doc.username,
             name: doc.display_name || doc.username,
-            specialty: meta?.specialty || doc.specialty || "General Practice",
+            specialty: docProfile?.specialty || meta?.specialty || "General Practice",
             experience: expVal || "5+ years experience",
-            bio: meta?.bio || doc.bio || "Specialist physician at Dr. Amanuel Hospital.",
+            bio: docProfile?.bio || meta?.bio || "",
             isOnline: Boolean(doc.is_online),
             isAvailable: true,
             photo: photos[i % photos.length],

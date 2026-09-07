@@ -32,6 +32,16 @@ function DoctorsPage() {
   const [videoModalOpen, setVideoModalOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | 'online' | 'offline'>('all');
   const { doctors: doctorsList, onlineDoctors, offlineDoctors, loading } = useDoctorsPresence();
+  const [expandedBios, setExpandedBios] = useState<Set<string>>(new Set());
+
+  const toggleBio = (id: string) => {
+    setExpandedBios((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // Use live database doctors directly
   const displayedDoctors =
@@ -189,6 +199,28 @@ function DoctorsPage() {
                       </span>
                     )}
                   </div>
+
+                  {/* Doctor Bio / Summary */}
+                  {doc.bio && (
+                    <div className="mt-1 mb-3">
+                      <p
+                        className={cn(
+                          "text-xs text-slate-600 dark:text-slate-400 italic leading-relaxed transition-all duration-300",
+                          !expandedBios.has(doc.id) && "line-clamp-2"
+                        )}
+                      >
+                        {doc.bio}
+                      </p>
+                      {doc.bio.length > 80 && (
+                        <button
+                          onClick={() => toggleBio(doc.id)}
+                          className="text-[11px] font-semibold text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 mt-0.5 transition-colors focus:outline-none"
+                        >
+                          {expandedBios.has(doc.id) ? "less ▲" : "more ▼"}
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                   {/* Details & Pricing */}
                   <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl mb-4">

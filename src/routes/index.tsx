@@ -217,6 +217,11 @@ function DoctorsPreview() {
                       </div>
                       <p className="text-sm text-primary font-medium">{doc.specialty || 'General Practice'}</p>
                       <p className="text-xs text-muted-foreground mono-technical">{doc.experience || '5+ years experience'}</p>
+                      {doc.bio && (
+                        <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 italic pt-1">
+                          "{doc.bio}"
+                        </p>
+                      )}
                       <div className="flex items-center gap-1 pt-2">
                         <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
                         <span className="text-sm font-medium mono-technical">4.9</span>
