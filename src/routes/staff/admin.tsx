@@ -294,15 +294,14 @@ function AdminDashboardPage() {
       );
 
       // Attempt backend/Supabase cascading deletion
-      await StaffAPI.deleteStaffAccount(targetId);
-      await StaffAPI.deleteStaffAccount(targetUsername);
+      await StaffAPI.deleteStaffAccount(targetId, targetUsername);
 
       toast.success("Staff account deleted successfully");
       setDeleteDialogOpen(false);
-      fetchStaffAccounts();
+      await fetchStaffAccounts();
     } catch (error: any) {
       toast.error(error?.message || "Failed to delete staff account");
-      fetchStaffAccounts();
+      await fetchStaffAccounts();
     } finally {
       setFormLoading(false);
     }

@@ -1,6 +1,6 @@
 import { apiFetch, handleApiResponse } from "./client";
 import { supabase } from "../supabase";
-import { setDoctorMetadata, getDoctorMetadata } from "../doctor-metadata";
+import { setDoctorMetadata, getDoctorMetadata, isStaffDeletedLocally, markStaffAsDeletedLocally, removeDoctorMetadata } from "../doctor-metadata";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // STAFF ACCOUNT TYPES
@@ -78,7 +78,12 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
   }
 
   return (data || [])
-    .filter((account: any) => account.role?.toUpperCase() !== "DELETED" && account.username !== "[DELETED]")
+    .filter(
+      (account: any) =>
+        account.role?.toUpperCase() !== "DELETED" &&
+        account.username !== "[DELETED]" &&
+        !isStaffDeletedLocally(account.id, account.username)
+    )
     .map((account: any) => {
       const meta = getDoctorMetadata(account.username);
       const isDoctor = account.role?.toUpperCase() === "DOCTOR";
@@ -119,7 +124,7 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
       body: JSON.stringify(data),
     });
     const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
-    if (result.data) {
+    if (result && result.data) {
       if (data.specialty || data.experience || data.bio) {
         setDoctorMetadata(result.data.username || data.username, {
           specialty: data.specialty,
@@ -129,6 +134,7 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
       }
       return result.data;
     }
+    throw new Error(result?.message || "Failed to create staff account");
   } catch {
     // Express API unavailable (CORS / network) — use Supabase directly
     const roleUpper = data.role.toUpperCase();
@@ -326,35 +332,41 @@ export const toggleStaffStatus = async (id: string | number, data?: ToggleStatus
  * DELETE /api/staff/:id
  * Delete staff account with cascading cleanup
  */
-export const deleteStaffAccount = async (id: string | number): Promise<void> => {
+export const deleteStaffAccount = async (id: string | number, username?: string): Promise<void> => {
+  const targetStr = String(id).trim();
+  markStaffAsDeletedLocally(targetStr, username);
+  if (username) removeDoctorMetadata(username);
+  removeDoctorMetadata(targetStr);
+
   try {
     const response = await apiFetch(`/api/staff/${id}`, {
       method: "DELETE",
     });
     await handleApiResponse<{ success: boolean; message: string }>(response);
   } catch {
-    // Express API unavailable (CORS / network) — delete directly via Supabase
-    const targetStr = String(id).trim();
+    // Express API unavailable — perform Supabase deletion and soft-delete updates
     const numId = parseInt(targetStr, 10);
 
-    // Direct table DELETE (no RPC — that function returns 400 / doesn't exist)
     if (!isNaN(numId)) {
-      const { error } = await supabase.from("staff_accounts").delete().eq("id", numId);
-      if (error) {
-        // Fallback: mark as deleted if hard-delete fails (e.g. FK constraints)
-        await supabase
-          .from("staff_accounts")
-          .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
-          .eq("id", numId);
-      }
-    } else {
-      const { error } = await supabase.from("staff_accounts").delete().ilike("username", targetStr);
-      if (error) {
-        await supabase
-          .from("staff_accounts")
-          .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
-          .ilike("username", targetStr);
-      }
+      await supabase.from("staff_accounts").delete().eq("id", numId);
+      await supabase
+        .from("staff_accounts")
+        .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
+        .eq("id", numId);
     }
+
+    if (username) {
+      await supabase.from("staff_accounts").delete().ilike("username", username.trim());
+      await supabase
+        .from("staff_accounts")
+        .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
+        .ilike("username", username.trim());
+    }
+
+    await supabase.from("staff_accounts").delete().ilike("username", targetStr);
+    await supabase
+      .from("staff_accounts")
+      .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
+      .ilike("username", targetStr);
   }
 };

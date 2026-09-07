@@ -5,7 +5,7 @@ import { PageHero } from "@/components/site/PageHero";
 import { Reveal } from "@/components/site/Reveal";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/lib/language-context";
-import { translations } from "@/lib/translations";
+import { t, translations } from "@/lib/translations";
 import { useDoctorsPresence } from "@/lib/useDoctorPresence";
 import { Video, Calendar, Star } from "lucide-react";
 import { cn } from "@/lib/utils";

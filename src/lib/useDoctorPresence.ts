@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { doctors } from "./site-data";
 import { supabase } from "./supabase";
 import { useStaffAuth } from "./staff-auth";
-import { getDoctorMetadata } from "./doctor-metadata";
+import { getDoctorMetadata, isStaffDeletedLocally } from "./doctor-metadata";
 
 export interface DoctorAccount {
   id: number | string;
@@ -43,7 +43,13 @@ export function useDoctorsPresence() {
 
       if (data && data.length > 0) {
         const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
-        const doctorsFromDB = data.map((doc: any, i: number) => {
+        const activeDocs = data.filter(
+          (doc: any) =>
+            doc.role?.toUpperCase() !== "DELETED" &&
+            doc.username !== "[DELETED]" &&
+            !isStaffDeletedLocally(doc.id, doc.username)
+        );
+        const doctorsFromDB = activeDocs.map((doc: any, i: number) => {
           const meta = getDoctorMetadata(doc.username);
           const rawExp = meta?.experience;
           let expVal = rawExp;
