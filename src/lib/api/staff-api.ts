@@ -143,8 +143,8 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
       }
       return result.data;
     }
-  } catch (apiErr) {
-    console.warn("[Staff API] Express API createStaff failed, using Supabase fallback:", apiErr);
+  } catch {
+    // Express API unavailable (CORS / network) — use Supabase directly
     const roleUpper = data.role.toUpperCase();
     const insertPayload: any = {
       username: data.username.toLowerCase().trim(),
@@ -162,10 +162,14 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
 
     if (error || !created) {
       console.error("[Staff API] Supabase account creation error:", error);
-      throw apiErr;
+      // 23505 = unique_violation (username already exists)
+      if (error?.code === "23505" || error?.message?.toLowerCase().includes("unique") || error?.message?.toLowerCase().includes("duplicate")) {
+        throw new Error(`Username "${data.username}" is already taken. Please choose a different username.`);
+      }
+      throw new Error(error?.message || "Failed to create account. Please try again.");
     }
 
-    // If doctor, also create/upsert a record in the doctors table
+    // If doctor, also upsert into the doctors table for specialty/experience/bio
     if (roleUpper === "DOCTOR" && (data.specialty || data.experience || data.bio)) {
       try {
         await supabase.from("doctors").upsert({
@@ -175,7 +179,7 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
           bio: data.bio,
         }, { onConflict: "username" });
       } catch (docErr) {
-        console.warn("[Staff API] Could not create doctors record:", docErr);
+        console.warn("[Staff API] Could not upsert doctors record:", docErr);
       }
       setDoctorMetadata(created.username, {
         specialty: data.specialty,
@@ -362,26 +366,29 @@ export const deleteStaffAccount = async (id: string | number): Promise<void> => 
       method: "DELETE",
     });
     await handleApiResponse<{ success: boolean; message: string }>(response);
-  } catch (apiErr) {
-    console.warn("[Staff API] Express API deleteStaff failed, using Supabase fallback:", apiErr);
+  } catch {
+    // Express API unavailable (CORS / network) — delete directly via Supabase
     const targetStr = String(id).trim();
     const numId = parseInt(targetStr, 10);
 
-    // 1. Attempt RPC call
-    try {
-      if (!isNaN(numId)) {
-        await supabase.rpc("delete_staff_account", { p_id: numId });
-      }
-      await supabase.rpc("delete_staff_account", { p_id: targetStr });
-    } catch {}
-
-    // 2. Direct table DELETE calls with strict type handling
+    // Direct table DELETE (no RPC — that function returns 400 / doesn't exist)
     if (!isNaN(numId)) {
-      await supabase.from("staff_accounts").delete().eq("id", numId);
-      await supabase.from("staff_accounts").update({ is_active: false, role: "DELETED", display_name: "[DELETED]" }).eq("id", numId);
+      const { error } = await supabase.from("staff_accounts").delete().eq("id", numId);
+      if (error) {
+        // Fallback: mark as deleted if hard-delete fails (e.g. FK constraints)
+        await supabase
+          .from("staff_accounts")
+          .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
+          .eq("id", numId);
+      }
     } else {
-      await supabase.from("staff_accounts").delete().ilike("username", targetStr);
-      await supabase.from("staff_accounts").update({ is_active: false, role: "DELETED", display_name: "[DELETED]" }).ilike("username", targetStr);
+      const { error } = await supabase.from("staff_accounts").delete().ilike("username", targetStr);
+      if (error) {
+        await supabase
+          .from("staff_accounts")
+          .update({ is_active: false, role: "DELETED", display_name: "[DELETED]" })
+          .ilike("username", targetStr);
+      }
     }
   }
 };
