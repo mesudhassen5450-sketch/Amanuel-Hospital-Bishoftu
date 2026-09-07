@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { doctors } from "./site-data";
 import { supabase } from "./supabase";
 import { useStaffAuth } from "./staff-auth";
+import { getDoctorMetadata } from "./doctor-metadata";
 
 export interface DoctorAccount {
   id: number | string;
@@ -33,7 +34,7 @@ export function useDoctorsPresence() {
 
         if (response.ok) {
           const result = await response.json();
-          if (result.success && Array.isArray(result.doctors) && result.doctors.length > 0) {
+          if (result.success && Array.isArray(result.doctors)) {
             console.log("[Doctors Hook] Loaded live doctors from Express API:", result.doctors);
             setDoctorsList(result.doctors);
             setLoading(false);
@@ -52,57 +53,32 @@ export function useDoctorsPresence() {
         .eq("is_active", true)
         .order("created_at", { ascending: true });
 
-      if (error) {
-        console.error("Database error fetching doctors from Supabase:", error);
-        setDoctorsList([]);
-        return;
-      }
-
       if (data && data.length > 0) {
-        // Attempt to fetch profile info from doctors (plural) or doctor table in Supabase
-        let profilesMap: Record<string, any> = {};
-        try {
-          const usernames = data.map((d: any) => d.username);
-          let { data: profData, error: profError } = await supabase
-            .from("doctors")
-            .select("username, specialty, experience, bio, is_available")
-            .in("username", usernames);
-
-          if (profError || !profData || profData.length === 0) {
-            const fallback = await supabase
-              .from("doctor")
-              .select("username, specialty, experience, bio, is_available")
-              .in("username", usernames);
-            if (fallback.data && fallback.data.length > 0) {
-              profData = fallback.data;
-            }
-          }
-
-          if (profData && profData.length > 0) {
-            profData.forEach((p: any) => {
-              if (p.username) {
-                profilesMap[p.username.toLowerCase()] = p;
-              }
-            });
-          }
-        } catch (profErr) {
-          // Ignore if optional doctor table query fails
-        }
-
         const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
         const doctorsFromDB = data.map((doc: any, i: number) => {
-          const prof = profilesMap[doc.username?.toLowerCase()] || {};
-          const experienceVal = prof.experience || doc.experience || (doc.raw_user_meta_data?.experience);
+          const meta = getDoctorMetadata(doc.username);
+          let rawExp = meta?.experience || doc.experience;
+          let expVal = rawExp;
+          if (expVal) {
+            if (typeof expVal === "number") {
+              expVal = `${expVal}+ years experience`;
+            } else {
+              expVal = String(expVal).trim();
+              if (!expVal.toLowerCase().includes("year")) {
+                expVal = `${expVal} years experience`;
+              }
+            }
+          }
 
           return {
             id: doc.id.toString(),
             username: doc.username,
             name: doc.display_name || doc.username,
-            specialty: prof.specialty || doc.specialty || "General Practice",
-            experience: experienceVal || "5+ years experience",
-            bio: prof.bio || doc.bio || "Specialist physician at Dr. Amanuel Hospital.",
+            specialty: meta?.specialty || doc.specialty || "General Practice",
+            experience: expVal || "5+ years experience",
+            bio: meta?.bio || doc.bio || "Specialist physician at Dr. Amanuel Hospital.",
             isOnline: Boolean(doc.is_online),
-            isAvailable: prof.is_available ?? true,
+            isAvailable: true,
             photo: photos[i % photos.length],
             lastSeen: doc.last_seen,
           };

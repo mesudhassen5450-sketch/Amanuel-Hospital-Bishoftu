@@ -27,9 +27,15 @@ export const login = async (req: Request, res: Response) => {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
 
-        const isValidPassword = await bcrypt.compare(password.trim(), staff.passwordHash);
+        let isValidPassword = false;
+        if (staff.passwordHash && (staff.passwordHash.startsWith('$2a$') || staff.passwordHash.startsWith('$2b$'))) {
+            isValidPassword = await bcrypt.compare(password.trim(), staff.passwordHash);
+        } else {
+            isValidPassword = staff.passwordHash === password.trim();
+        }
+
         if (!isValidPassword) {
-            return res.status(401).json({ error: 'Invalid username or password' });
+            return res.status(401).json({ success: false, message: 'Invalid username or password', error: 'Invalid username or password' });
         }
 
         if (staff.isActive === false) {

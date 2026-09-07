@@ -93,6 +93,7 @@ app.get("/", (req, res) => {
       health: "/health",
       auth: "/api/auth",
       staff: "/api/staff",
+      doctors: "/api/doctors",
       payments: "/api/payments",
     },
   });

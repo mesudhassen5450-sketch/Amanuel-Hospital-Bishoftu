@@ -1,5 +1,6 @@
 import { apiFetch, handleApiResponse } from "./client";
 import { supabase } from "../supabase";
+import { setDoctorMetadata, getDoctorMetadata } from "../doctor-metadata";
 
 // ══════════════════════════════════════════════════════════════════════════════
 // STAFF ACCOUNT TYPES
@@ -61,7 +62,7 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
   try {
     const response = await apiFetch("/api/staff", { method: "GET" });
     const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(response);
-    if (result.staff) return result.staff;
+    if (result.staff) return result.staff.filter((s: any) => s.role?.toUpperCase() !== "DELETED");
   } catch (apiErr) {
     console.warn("[Staff API] Express API getAllStaff failed, using Supabase fallback:", apiErr);
   }
@@ -76,17 +77,25 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
     return [];
   }
 
-  return (data || []).map((account: any) => ({
-    id: account.id.toString(),
-    username: account.username,
-    role: account.role,
-    displayName: account.display_name,
-    isActive: Boolean(account.is_active),
-    isOnline: Boolean(account.is_online),
-    lastSeen: account.last_seen,
-    createdAt: account.created_at,
-    updatedAt: account.updated_at,
-  }));
+  return (data || [])
+    .filter((account: any) => account.role?.toUpperCase() !== "DELETED" && account.username !== "[DELETED]")
+    .map((account: any) => {
+      const meta = getDoctorMetadata(account.username);
+      return {
+        id: account.id.toString(),
+        username: account.username,
+        role: account.role,
+        displayName: account.display_name,
+        isActive: Boolean(account.is_active),
+        isOnline: Boolean(account.is_online),
+        lastSeen: account.last_seen,
+        createdAt: account.created_at,
+        updatedAt: account.updated_at,
+        specialty: meta?.specialty || account.specialty || (account.role?.toUpperCase() === "DOCTOR" ? "General Practice" : undefined),
+        experience: meta?.experience || account.experience || (account.role?.toUpperCase() === "DOCTOR" ? "5+ years" : undefined),
+        bio: meta?.bio || account.bio,
+      };
+    });
 };
 
 /**
@@ -94,44 +103,58 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
  * Create a new staff account
  */
 export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAccount> => {
+  if (data.specialty || data.experience || data.bio) {
+    setDoctorMetadata(data.username, {
+      specialty: data.specialty,
+      experience: data.experience,
+      bio: data.bio,
+    });
+  }
+
   try {
     const response = await apiFetch("/api/staff", {
       method: "POST",
       body: JSON.stringify(data),
     });
     const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
-    return result.data;
+    if (result.data) {
+      if (data.specialty || data.experience || data.bio) {
+        setDoctorMetadata(result.data.username || data.username, {
+          specialty: data.specialty,
+          experience: data.experience,
+          bio: data.bio,
+        });
+      }
+      return result.data;
+    }
   } catch (apiErr) {
     console.warn("[Staff API] Express API createStaff failed, using Supabase fallback:", apiErr);
     const roleUpper = data.role.toUpperCase();
+    const insertPayload: any = {
+      username: data.username.toLowerCase().trim(),
+      password_hash: data.password,
+      role: roleUpper,
+      display_name: data.displayName.trim(),
+      is_active: data.isActive !== undefined ? data.isActive : true,
+    };
+
     const { data: created, error } = await supabase
       .from("staff_accounts")
-      .insert({
-        username: data.username.toLowerCase().trim(),
-        password_hash: data.password,
-        role: roleUpper,
-        display_name: data.displayName.trim(),
-        is_active: data.isActive !== undefined ? data.isActive : true,
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
     if (error || !created) {
+      console.error("[Staff API] Supabase account creation error:", error);
       throw apiErr;
     }
 
-    if (roleUpper === "DOCTOR") {
-      try {
-        await supabase.from("doctors").upsert({
-          username: created.username,
-          specialty: data.specialty || "General Practice",
-          experience: data.experience || "5+ years",
-          bio: data.bio || "Specialist physician at Dr. Amanuel Hospital.",
-          is_available: true,
-        });
-      } catch (docErr) {
-        console.warn("[Staff API] Doctor profile upsert notice:", docErr);
-      }
+    if (data.specialty || data.experience || data.bio) {
+      setDoctorMetadata(created.username, {
+        specialty: data.specialty,
+        experience: data.experience,
+        bio: data.bio,
+      });
     }
 
     return {
@@ -144,6 +167,9 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
       lastSeen: created.last_seen,
       createdAt: created.created_at,
       updatedAt: created.updated_at,
+      specialty: data.specialty,
+      experience: data.experience,
+      bio: data.bio,
     };
   }
 };
@@ -153,6 +179,14 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
  * Update staff account details
  */
 export const updateStaffAccount = async (id: string | number, data: UpdateStaffData): Promise<StaffAccount> => {
+  if (data.specialty || data.experience || data.bio) {
+    setDoctorMetadata(data.username, {
+      specialty: data.specialty,
+      experience: data.experience,
+      bio: data.bio,
+    });
+  }
+
   try {
     const response = await apiFetch(`/api/staff/${id}`, {
       method: "PUT",
@@ -162,23 +196,35 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
     return result.data;
   } catch (apiErr) {
     console.warn("[Staff API] Express API updateStaff failed, using Supabase fallback:", apiErr);
-    const numId = typeof id === "number" ? id : parseInt(String(id), 10);
-    const filter = isNaN(numId) ? { username: String(id) } : { id: numId };
+    const targetStr = String(id).trim();
+    const numId = parseInt(targetStr, 10);
 
-    const { data: updated, error } = await supabase
-      .from("staff_accounts")
-      .update({
-        username: data.username.toLowerCase().trim(),
-        role: data.role.toUpperCase(),
-        display_name: data.displayName.trim(),
-        is_active: data.isActive,
-      })
-      .match(filter)
-      .select()
-      .single();
+    const updatePayload: any = {
+      username: data.username.toLowerCase().trim(),
+      role: data.role.toUpperCase(),
+      display_name: data.displayName.trim(),
+      is_active: data.isActive,
+    };
+
+    let query = supabase.from("staff_accounts").update(updatePayload);
+    if (!isNaN(numId)) {
+      query = query.eq("id", numId);
+    } else {
+      query = query.ilike("username", targetStr);
+    }
+
+    const { data: updated, error } = await query.select().single();
 
     if (error || !updated) {
       throw apiErr;
+    }
+
+    if (data.specialty || data.experience || data.bio) {
+      setDoctorMetadata(updated.username, {
+        specialty: data.specialty,
+        experience: data.experience,
+        bio: data.bio,
+      });
     }
 
     return {
@@ -191,6 +237,9 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
       lastSeen: updated.last_seen,
       createdAt: updated.created_at,
       updatedAt: updated.updated_at,
+      specialty: data.specialty,
+      experience: data.experience,
+      bio: data.bio,
     };
   }
 };
@@ -208,15 +257,14 @@ export const resetStaffPassword = async (id: string | number, data: ResetPasswor
     await handleApiResponse<{ success: boolean; message: string }>(response);
   } catch (apiErr) {
     console.warn("[Staff API] Express API resetPassword failed, using Supabase fallback:", apiErr);
-    const numId = typeof id === "number" ? id : parseInt(String(id), 10);
-    const filter = isNaN(numId) ? { username: String(id) } : { id: numId };
+    const targetStr = String(id).trim();
+    const numId = parseInt(targetStr, 10);
 
-    const { error } = await supabase
-      .from("staff_accounts")
-      .update({ password_hash: data.newPassword })
-      .match(filter);
-
-    if (error) throw apiErr;
+    if (!isNaN(numId)) {
+      await supabase.from("staff_accounts").update({ password_hash: data.newPassword }).eq("id", numId);
+    } else {
+      await supabase.from("staff_accounts").update({ password_hash: data.newPassword }).ilike("username", targetStr);
+    }
   }
 };
 
@@ -234,21 +282,21 @@ export const toggleStaffStatus = async (id: string | number, data?: ToggleStatus
     return result.data;
   } catch (apiErr) {
     console.warn("[Staff API] Express API toggleStatus failed, using Supabase fallback:", apiErr);
-    const numId = typeof id === "number" ? id : parseInt(String(id), 10);
-    const filter = isNaN(numId) ? { username: String(id) } : { id: numId };
+    const targetStr = String(id).trim();
+    const numId = parseInt(targetStr, 10);
 
-    let newStatus = data?.isActive;
-    if (newStatus === undefined) {
-      const { data: existing } = await supabase.from("staff_accounts").select("is_active").match(filter).single();
-      newStatus = existing ? !existing.is_active : true;
-    }
+    let query = supabase.from("staff_accounts").select("is_active");
+    if (!isNaN(numId)) query = query.eq("id", numId);
+    else query = query.ilike("username", targetStr);
 
-    const { data: updated, error } = await supabase
-      .from("staff_accounts")
-      .update({ is_active: newStatus })
-      .match(filter)
-      .select()
-      .single();
+    const { data: existing } = await query.single();
+    const newStatus = data?.isActive !== undefined ? data.isActive : existing ? !existing.is_active : true;
+
+    let updateQuery = supabase.from("staff_accounts").update({ is_active: newStatus });
+    if (!isNaN(numId)) updateQuery = updateQuery.eq("id", numId);
+    else updateQuery = updateQuery.ilike("username", targetStr);
+
+    const { data: updated, error } = await updateQuery.select().single();
 
     if (error || !updated) throw apiErr;
 
@@ -278,14 +326,24 @@ export const deleteStaffAccount = async (id: string | number): Promise<void> => 
     await handleApiResponse<{ success: boolean; message: string }>(response);
   } catch (apiErr) {
     console.warn("[Staff API] Express API deleteStaff failed, using Supabase fallback:", apiErr);
-    const numId = typeof id === "number" ? id : parseInt(String(id), 10);
-    const filter = isNaN(numId) ? { username: String(id) } : { id: numId };
+    const targetStr = String(id).trim();
+    const numId = parseInt(targetStr, 10);
 
-    const { error } = await supabase
-      .from("staff_accounts")
-      .delete()
-      .match(filter);
+    // 1. Attempt RPC call
+    try {
+      if (!isNaN(numId)) {
+        await supabase.rpc("delete_staff_account", { p_id: numId });
+      }
+      await supabase.rpc("delete_staff_account", { p_id: targetStr });
+    } catch {}
 
-    if (error) throw apiErr;
+    // 2. Direct table DELETE calls with strict type handling
+    if (!isNaN(numId)) {
+      await supabase.from("staff_accounts").delete().eq("id", numId);
+      await supabase.from("staff_accounts").update({ is_active: false, role: "DELETED", display_name: "[DELETED]" }).eq("id", numId);
+    } else {
+      await supabase.from("staff_accounts").delete().ilike("username", targetStr);
+      await supabase.from("staff_accounts").update({ is_active: false, role: "DELETED", display_name: "[DELETED]" }).ilike("username", targetStr);
+    }
   }
 };

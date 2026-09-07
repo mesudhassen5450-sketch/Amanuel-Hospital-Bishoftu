@@ -271,12 +271,26 @@ function AdminDashboardPage() {
 
     try {
       setFormLoading(true);
-      await StaffAPI.deleteStaffAccount(selectedStaff.id);
+      const targetId = selectedStaff.id;
+      const targetUsername = selectedStaff.username;
+      
+      // Optimistically remove from UI state
+      setStaffAccounts((prev) =>
+        prev.filter(
+          (s) => String(s.id) !== String(targetId) && s.username?.toLowerCase() !== targetUsername?.toLowerCase()
+        )
+      );
+
+      // Attempt backend/Supabase cascading deletion
+      await StaffAPI.deleteStaffAccount(targetId);
+      await StaffAPI.deleteStaffAccount(targetUsername);
+
       toast.success("Staff account deleted successfully");
       setDeleteDialogOpen(false);
       fetchStaffAccounts();
     } catch (error: any) {
       toast.error(error?.message || "Failed to delete staff account");
+      fetchStaffAccounts();
     } finally {
       setFormLoading(false);
     }
