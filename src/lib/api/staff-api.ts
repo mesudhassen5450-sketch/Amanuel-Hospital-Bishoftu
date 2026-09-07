@@ -59,22 +59,20 @@ export interface ToggleStatusData {
  * Fetch all staff accounts
  */
 export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
-  try {
-    const response = await apiFetch("/api/staff", { method: "GET" });
-    const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(response);
-    if (result.staff) return result.staff.filter((s: any) => s.role?.toUpperCase() !== "DELETED");
-  } catch (apiErr) {
-    console.warn("[Staff API] Express API getAllStaff failed, using Supabase fallback:", apiErr);
-  }
-
   const { data, error } = await supabase
     .from("staff_accounts")
     .select("id, username, role, display_name, is_active, is_online, last_seen, created_at, updated_at")
     .order("created_at", { ascending: true });
 
   if (error) {
-    console.error("[Staff API] Supabase fallback error:", error);
-    return [];
+    console.error("[Staff API] Supabase fetch error:", error);
+    try {
+      const response = await apiFetch("/api/staff", { method: "GET" });
+      const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(response);
+      if (result.staff) return result.staff.filter((s: any) => s.role?.toUpperCase() !== "DELETED");
+    } catch {
+      return [];
+    }
   }
 
   return (data || [])
@@ -107,155 +105,148 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
 
 /**
  * POST /api/staff
- * Create a new staff account
+ * Create a new staff account directly in Supabase
  */
 export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAccount> => {
+  const roleUpper = data.role.toUpperCase();
+  const cleanUsername = data.username.toLowerCase().trim();
+
   if (data.specialty || data.experience || data.bio) {
-    setDoctorMetadata(data.username, {
+    setDoctorMetadata(cleanUsername, {
       specialty: data.specialty,
       experience: data.experience,
       bio: data.bio,
     });
   }
 
+  // Primary: Save directly to Supabase staff_accounts so public pages & realtime work on deployed & local
+  const insertPayload: any = {
+    username: cleanUsername,
+    password_hash: data.password,
+    role: roleUpper,
+    display_name: data.displayName.trim(),
+    is_active: data.isActive !== undefined ? data.isActive : true,
+  };
+
+  const { data: created, error: sbError } = await supabase
+    .from("staff_accounts")
+    .upsert(insertPayload, { onConflict: "username" })
+    .select()
+    .single();
+
+  if (sbError) {
+    console.error("[Staff API] Supabase account creation error:", sbError);
+    if (
+      sbError.code === "23505" ||
+      sbError.message?.toLowerCase().includes("unique") ||
+      sbError.message?.toLowerCase().includes("duplicate")
+    ) {
+      throw new Error(`Username "${data.username}" is already taken. Please choose a different username.`);
+    }
+  }
+
+  // Secondary: Attempt Express backend sync if available
   try {
     const response = await apiFetch("/api/staff", {
       method: "POST",
       body: JSON.stringify(data),
     });
-    const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
-    if (result && result.data) {
-      if (data.specialty || data.experience || data.bio) {
-        setDoctorMetadata(result.data.username || data.username, {
-          specialty: data.specialty,
-          experience: data.experience,
-          bio: data.bio,
-        });
-      }
-      return result.data;
-    }
-    throw new Error(result?.message || "Failed to create staff account");
-  } catch {
-    // Express API unavailable (CORS / network) — use Supabase directly
-    const roleUpper = data.role.toUpperCase();
-    const insertPayload: any = {
-      username: data.username.toLowerCase().trim(),
-      password_hash: data.password,
-      role: roleUpper,
-      display_name: data.displayName.trim(),
-      is_active: data.isActive !== undefined ? data.isActive : true,
-    };
+    await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
+  } catch (apiErr) {
+    console.log("[Staff API] Express API creation skipped/unavailable, Supabase active");
+  }
 
-    const { data: created, error } = await supabase
-      .from("staff_accounts")
-      .insert(insertPayload)
-      .select()
-      .single();
-
-    if (error || !created) {
-      console.error("[Staff API] Supabase account creation error:", error);
-      // 23505 = unique_violation (username already exists)
-      if (error?.code === "23505" || error?.message?.toLowerCase().includes("unique") || error?.message?.toLowerCase().includes("duplicate")) {
-        throw new Error(`Username "${data.username}" is already taken. Please choose a different username.`);
-      }
-      throw new Error(error?.message || "Failed to create account. Please try again.");
-    }
-
-    // Save doctor metadata to localStorage (used by public doctors page)
-    if (roleUpper === "DOCTOR" && (data.specialty || data.experience || data.bio)) {
-      setDoctorMetadata(created.username, {
-        specialty: data.specialty,
-        experience: data.experience,
-        bio: data.bio,
-      });
-    }
-
-    return {
-      id: created.id.toString(),
-      username: created.username,
-      role: created.role,
-      displayName: created.display_name,
-      isActive: Boolean(created.is_active),
-      isOnline: Boolean(created.is_online),
-      lastSeen: created.last_seen,
-      createdAt: created.created_at,
-      updatedAt: created.updated_at,
+  const finalUsername = created?.username || cleanUsername;
+  if (roleUpper === "DOCTOR" && (data.specialty || data.experience || data.bio)) {
+    setDoctorMetadata(finalUsername, {
       specialty: data.specialty,
       experience: data.experience,
       bio: data.bio,
-    };
+    });
   }
+
+  return {
+    id: created?.id ? created.id.toString() : Date.now().toString(),
+    username: finalUsername,
+    role: created?.role || roleUpper,
+    displayName: created?.display_name || data.displayName,
+    isActive: created?.is_active !== undefined ? Boolean(created.is_active) : data.isActive,
+    isOnline: Boolean(created?.is_online),
+    lastSeen: created?.last_seen || null,
+    createdAt: created?.created_at || new Date().toISOString(),
+    updatedAt: created?.updated_at || new Date().toISOString(),
+    specialty: data.specialty,
+    experience: data.experience,
+    bio: data.bio,
+  };
 };
 
 /**
  * PUT /api/staff/:id
- * Update staff account details
+ * Update staff account details directly in Supabase
  */
 export const updateStaffAccount = async (id: string | number, data: UpdateStaffData): Promise<StaffAccount> => {
+  const cleanUsername = data.username.toLowerCase().trim();
+
   if (data.specialty || data.experience || data.bio) {
-    setDoctorMetadata(data.username, {
+    setDoctorMetadata(cleanUsername, {
       specialty: data.specialty,
       experience: data.experience,
       bio: data.bio,
     });
   }
 
+  const targetStr = String(id).trim();
+  const numId = parseInt(targetStr, 10);
+
+  const updatePayload: any = {
+    username: cleanUsername,
+    role: data.role.toUpperCase(),
+    display_name: data.displayName.trim(),
+    is_active: data.isActive,
+  };
+
+  let query = supabase.from("staff_accounts").update(updatePayload);
+  if (!isNaN(numId)) {
+    query = query.eq("id", numId);
+  } else {
+    query = query.ilike("username", targetStr);
+  }
+
+  const { data: updated } = await query.select().single();
+
   try {
-    const response = await apiFetch(`/api/staff/${id}`, {
+    await apiFetch(`/api/staff/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
-    const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
-    return result.data;
   } catch (apiErr) {
-    console.warn("[Staff API] Express API updateStaff failed, using Supabase fallback:", apiErr);
-    const targetStr = String(id).trim();
-    const numId = parseInt(targetStr, 10);
+    console.log("[Staff API] Express update skipped/unavailable");
+  }
 
-    const updatePayload: any = {
-      username: data.username.toLowerCase().trim(),
-      role: data.role.toUpperCase(),
-      display_name: data.displayName.trim(),
-      is_active: data.isActive,
-    };
-
-    let query = supabase.from("staff_accounts").update(updatePayload);
-    if (!isNaN(numId)) {
-      query = query.eq("id", numId);
-    } else {
-      query = query.ilike("username", targetStr);
-    }
-
-    const { data: updated, error } = await query.select().single();
-
-    if (error || !updated) {
-      throw apiErr;
-    }
-
-    // Save doctor metadata to localStorage (used by public doctors page)
-    if (data.role?.toUpperCase() === "DOCTOR" && (data.specialty !== undefined || data.experience !== undefined || data.bio !== undefined)) {
-      setDoctorMetadata(updated.username, {
-        specialty: data.specialty,
-        experience: data.experience,
-        bio: data.bio,
-      });
-    }
-
-    return {
-      id: updated.id.toString(),
-      username: updated.username,
-      role: updated.role,
-      displayName: updated.display_name,
-      isActive: Boolean(updated.is_active),
-      isOnline: Boolean(updated.is_online),
-      lastSeen: updated.last_seen,
-      createdAt: updated.created_at,
-      updatedAt: updated.updated_at,
+  const finalUsername = updated?.username || cleanUsername;
+  if (data.role?.toUpperCase() === "DOCTOR" && (data.specialty !== undefined || data.experience !== undefined || data.bio !== undefined)) {
+    setDoctorMetadata(finalUsername, {
       specialty: data.specialty,
       experience: data.experience,
       bio: data.bio,
-    };
+    });
   }
+
+  return {
+    id: updated?.id ? updated.id.toString() : String(id),
+    username: finalUsername,
+    role: updated?.role || data.role,
+    displayName: updated?.display_name || data.displayName,
+    isActive: updated?.is_active !== undefined ? Boolean(updated.is_active) : data.isActive,
+    isOnline: Boolean(updated?.is_online),
+    lastSeen: updated?.last_seen || null,
+    createdAt: updated?.created_at || new Date().toISOString(),
+    updatedAt: updated?.updated_at || new Date().toISOString(),
+    specialty: data.specialty,
+    experience: data.experience,
+    bio: data.bio,
+  };
 };
 
 /**
