@@ -45,7 +45,7 @@ export function useDoctorsPresence() {
         console.warn("[Doctors Hook] Backend API call failed, using Supabase fallback...");
       }
 
-      // 2. Fallback: Fetch directly from Supabase database (handles both 'DOCTOR' and 'doctor')
+      // 2. Fallback: Fetch directly from Supabase staff_accounts
       const { data, error } = await supabase
         .from("staff_accounts")
         .select("id, display_name, username, role, is_active, is_online, last_seen")
@@ -57,26 +57,12 @@ export function useDoctorsPresence() {
         console.error("Database error fetching doctors from Supabase:", error);
       }
 
-      // Fetch doctor profiles from the doctors table
-      let doctorProfiles: Record<string, any> = {};
-      try {
-        const { data: docData } = await supabase
-          .from("doctors")
-          .select("username, specialty, experience, bio");
-        if (docData) {
-          for (const d of docData) {
-            doctorProfiles[d.username?.toLowerCase()] = d;
-          }
-        }
-      } catch {}
-
       if (data && data.length > 0) {
         const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
         const doctorsFromDB = data.map((doc: any, i: number) => {
+          // Use localStorage metadata (set when admin creates/edits doctor)
           const meta = getDoctorMetadata(doc.username);
-          const docProfile = doctorProfiles[doc.username?.toLowerCase()];
-          // Priority: doctors table > localStorage metadata > default
-          const rawExp = docProfile?.experience || meta?.experience;
+          const rawExp = meta?.experience;
           let expVal = rawExp;
           if (expVal) {
             if (typeof expVal === "number") {
@@ -93,9 +79,9 @@ export function useDoctorsPresence() {
             id: doc.id.toString(),
             username: doc.username,
             name: doc.display_name || doc.username,
-            specialty: docProfile?.specialty || meta?.specialty || "General Practice",
+            specialty: meta?.specialty || "General Practice",
             experience: expVal || "5+ years experience",
-            bio: docProfile?.bio || meta?.bio || "",
+            bio: meta?.bio || "",
             isOnline: Boolean(doc.is_online),
             isAvailable: true,
             photo: photos[i % photos.length],

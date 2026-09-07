@@ -77,25 +77,11 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
     return [];
   }
 
-  // Fetch doctor profiles from doctors table for additional metadata
-  let doctorProfiles: Record<string, any> = {};
-  try {
-    const { data: docData } = await supabase
-      .from("doctors")
-      .select("username, specialty, experience, bio");
-    if (docData) {
-      for (const d of docData) {
-        doctorProfiles[d.username?.toLowerCase()] = d;
-      }
-    }
-  } catch {}
-
   return (data || [])
     .filter((account: any) => account.role?.toUpperCase() !== "DELETED" && account.username !== "[DELETED]")
     .map((account: any) => {
       const meta = getDoctorMetadata(account.username);
       const isDoctor = account.role?.toUpperCase() === "DOCTOR";
-      const docProfile = doctorProfiles[account.username?.toLowerCase()];
       return {
         id: account.id.toString(),
         username: account.username,
@@ -106,10 +92,10 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
         lastSeen: account.last_seen,
         createdAt: account.created_at,
         updatedAt: account.updated_at,
-        // DB (doctors table) > localStorage metadata > defaults
-        specialty: docProfile?.specialty || meta?.specialty || (isDoctor ? "General Practice" : undefined),
-        experience: docProfile?.experience || meta?.experience || (isDoctor ? "5+ years" : undefined),
-        bio: docProfile?.bio || meta?.bio,
+        // localStorage metadata (set when admin creates/edits doctor) > defaults
+        specialty: meta?.specialty || (isDoctor ? "General Practice" : undefined),
+        experience: meta?.experience || (isDoctor ? "5+ years" : undefined),
+        bio: meta?.bio,
       };
     });
 };
@@ -169,18 +155,8 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
       throw new Error(error?.message || "Failed to create account. Please try again.");
     }
 
-    // If doctor, also upsert into the doctors table for specialty/experience/bio
+    // Save doctor metadata to localStorage (used by public doctors page)
     if (roleUpper === "DOCTOR" && (data.specialty || data.experience || data.bio)) {
-      try {
-        await supabase.from("doctors").upsert({
-          username: created.username,
-          specialty: data.specialty || "General Practice",
-          experience: data.experience,
-          bio: data.bio,
-        }, { onConflict: "username" });
-      } catch (docErr) {
-        console.warn("[Staff API] Could not upsert doctors record:", docErr);
-      }
       setDoctorMetadata(created.username, {
         specialty: data.specialty,
         experience: data.experience,
@@ -250,18 +226,8 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
       throw apiErr;
     }
 
-    // If doctor, also upsert the doctors table with profile info
+    // Save doctor metadata to localStorage (used by public doctors page)
     if (data.role?.toUpperCase() === "DOCTOR" && (data.specialty !== undefined || data.experience !== undefined || data.bio !== undefined)) {
-      try {
-        await supabase.from("doctors").upsert({
-          username: updated.username,
-          specialty: data.specialty || "General Practice",
-          experience: data.experience,
-          bio: data.bio,
-        }, { onConflict: "username" });
-      } catch (docErr) {
-        console.warn("[Staff API] Could not update doctors record:", docErr);
-      }
       setDoctorMetadata(updated.username, {
         specialty: data.specialty,
         experience: data.experience,
