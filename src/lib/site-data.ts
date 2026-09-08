@@ -2,16 +2,15 @@ import {
   Stethoscope,
   Siren,
   Slice,
-  ScanLine,
-  FlaskConical,
   Baby,
   HeartPulse,
-  Pill,
   Brain,
   Bone,
   Eye,
   Activity,
   Ear,
+  Sparkles,
+  Users,
   type LucideIcon,
 } from "lucide-react";
 
@@ -42,57 +41,65 @@ export const services: Service[] = [
   {
     id: "emergency-services",
     title: "Emergency Services",
-    description: "24-hour emergency medical services with rapid response and critical care capabilities.",
+    description: "24/7 emergency services are available at the hospital.",
     detail:
-      "Our emergency department operates 24/7 with trained emergency physicians, advanced life support equipment, and ambulance coordination for immediate medical attention. Emergency surgeries, deliveries, and critical care available round-the-clock.",
+      "Amanuel Hospital provides emergency services 24 hours a day, 7 days a week.",
     icon: Siren,
   },
   {
     id: "medical-services",
     title: "Medical Services",
-    description: "Comprehensive internal medicine and general practice for diagnosis and treatment.",
+    description: "General medical care provided by the hospital.",
     detail:
-      "Expert medical care including general consultations, chronic disease management, preventive health check-ups, and specialized diagnostic services.",
+      "The hospital provides general medical care for patients who need medical services.",
     icon: Stethoscope,
   },
   {
     id: "surgical-services",
     title: "Surgical Services",
-    description: "24-hour surgical capabilities with modern operating theaters and experienced surgeons.",
+    description: "24-hour surgical services are available at the hospital.",
     detail:
-      "Advanced surgical procedures including general surgery, orthopedic operations, and emergency surgeries performed in state-of-the-art operating rooms. 24/7 emergency surgical services available round-the-clock.",
+      "Amanuel Hospital provides surgical services around the clock, 24 hours a day.",
     icon: Slice,
   },
   {
-    id: "pediatric-care",
-    title: "Pediatric Care",
-    description: "Specialized healthcare for infants, children, and adolescents with compassionate experts.",
+    id: "pediatric-services",
+    title: "Pediatric Services",
+    description: "Medical care for children.",
     detail:
-      "Complete pediatric services including well-child visits, immunizations, growth monitoring, and treatment of childhood illnesses in a child-friendly environment.",
+      "The hospital provides medical care for children.",
     icon: Baby,
   },
   {
     id: "gynecology-obstetrics",
     title: "Gynecology & Obstetrics",
-    description: "Women's health services including prenatal care, safe delivery, and gynecological treatment.",
+    description: "Women's health, obstetric, and gynecological care.",
     detail:
-      "Comprehensive maternal and women's healthcare with antenatal clinics, delivery services, caesarean sections, family planning, and gynecological consultations. 24/7 emergency deliveries and critical maternal care available round-the-clock.",
+      "The hospital provides women's health care, including obstetric and gynecological services.",
     icon: HeartPulse,
   },
   {
     id: "ent-services",
     title: "ENT Services",
-    description: "Specialized ear, nose, and throat procedures by experienced ENT specialists.",
+    description: "ENT services through specialists, including tonsillectomy and other ENT services.",
     detail:
-      "Comprehensive ENT care including tonsillectomy, adenoidectomy, sinus treatments, ear infections, hearing evaluations, and advanced diagnostic procedures for ear, nose, and throat conditions.",
+      "The hospital provides ear, nose, and throat (ENT) services through specialists. This includes tonsillectomy and other ENT services.",
     icon: Ear,
+  },
+  {
+    id: "emergency-surgery-delivery",
+    title: "Emergency Surgeries & Deliveries",
+    description: "All emergency surgeries and deliveries are available 24/7.",
+    detail:
+      "Emergency surgeries and emergency deliveries are available 24 hours a day, 7 days a week.",
+    icon: Activity,
   },
   {
     id: "orthopedic-services",
     title: "Orthopedic Surgical Services",
-    description: "24-hour orthopedic surgery and trauma care for bone, joint, and musculoskeletal injuries.",
+    description: "Orthopedic surgical services are available 24/7.",
     detail:
-      "Comprehensive orthopedic surgical care including fracture repairs, joint surgeries, sports injuries, and trauma management. 24/7 emergency orthopedic surgical services available round-the-clock for urgent bone and joint injuries.",
+      "The hospital provides orthopedic surgical services 24 hours a day, 7 days a week.",
     icon: Bone,
   },
 ];
@@ -118,53 +125,53 @@ export interface Department {
 export const departments: Department[] = [
   {
     name: "Internal Medicine",
-    description: "Diagnosis and treatment of adult diseases, chronic condition management.",
-    icon: Activity,
+    description: "Clinical specialty in internal medicine.",
+    icon: Stethoscope,
   },
   {
-    name: "Surgery",
-    description: "General and specialized surgical procedures in modern theaters. 24/7 emergency surgical services available.",
+    name: "General Surgery",
+    description: "Clinical specialty in general surgery.",
     icon: Slice,
   },
   {
-    name: "Pediatrics",
-    description: "Dedicated child healthcare from newborns to adolescents.",
-    icon: Baby,
-  },
-  {
-    name: "Obstetrics & Gynecology",
-    description: "Women's health, antenatal care and safe delivery services. 24/7 emergency deliveries and maternal care available.",
-    icon: HeartPulse,
-  },
-  {
-    name: "Emergency Medicine",
-    description: "24/7 rapid response emergency and trauma care available round-the-clock.",
-    icon: Siren,
-  },
-  {
-    name: "Radiology & Imaging",
-    description: "X-ray, ultrasound and CT diagnostics with expert reading.",
-    icon: ScanLine,
-  },
-  {
-    name: "Neurology",
-    description: "Care for disorders of the brain, spine and nervous system.",
-    icon: Brain,
-  },
-  {
-    name: "Orthopedics",
-    description: "Bone, joint and musculoskeletal treatment and rehabilitation. 24/7 emergency orthopedic surgical services available.",
+    name: "Orthopedic Surgery",
+    description: "Clinical specialty in orthopedic surgery.",
     icon: Bone,
   },
   {
-    name: "ENT (Ear, Nose & Throat)",
-    description: "Specialized ear, nose and throat procedures including tonsillectomy and advanced ENT care.",
+    name: "Obstetrics & Gynecology",
+    description: "Clinical specialty in obstetrics and gynecology.",
+    icon: HeartPulse,
+  },
+  {
+    name: "ENT",
+    description: "Ear, nose, and throat specialty.",
     icon: Ear,
   },
   {
     name: "Ophthalmology",
-    description: "Eye examinations, treatment and minor eye surgery.",
+    description: "Eye care and ophthalmology specialty.",
     icon: Eye,
+  },
+  {
+    name: "Neurosurgery",
+    description: "Clinical specialty in neurosurgery.",
+    icon: Brain,
+  },
+  {
+    name: "Pediatric Surgery",
+    description: "Clinical specialty in pediatric surgery.",
+    icon: Baby,
+  },
+  {
+    name: "Dermatology",
+    description: "Clinical specialty in dermatology.",
+    icon: Sparkles,
+  },
+  {
+    name: "Psychiatry",
+    description: "Clinical specialty in psychiatry.",
+    icon: Users,
   },
 ];
 
@@ -251,7 +258,7 @@ export const galleryImages: GalleryImage[] = [
   { src: galleryLab, alt: "Hospital laboratory with modern microscopes", width: 900, height: 1200 },
   { src: gallerySurgery, alt: "Modern operating theater with surgical lights", width: 1200, height: 800 },
   { src: galleryPediatrics, alt: "Nurse caring for a child in the pediatric ward", width: 1200, height: 900 },
-  { src: galleryRadiology, alt: "CT scanner in the radiology department", width: 900, height: 1100 },
+  { src: galleryRadiology, alt: "Hospital medical equipment", width: 900, height: 1100 },
   { src: galleryPharmacy, alt: "Hospital pharmacy with organized medicine shelves", width: 1200, height: 800 },
   { src: galleryWard, alt: "Bright modern patient room", width: 900, height: 1200 },
   { src: aboutLobby, alt: "Hospital reception lobby", width: 1200, height: 900 },

@@ -10,7 +10,7 @@ export const Route = createFileRoute("/departments")({
   head: () => ({
     meta: [
       { title: "Departments — Dr. Amanuel Hospital" },
-      { name: "description", content: "Explore the clinical departments of Dr. Amanuel Hospital: internal medicine, surgery, pediatrics, ob-gyn, emergency and more." },
+      { name: "description", content: "Clinical specialties at Dr. Amanuel Hospital: internal medicine, general surgery, orthopedic surgery, obstetrics and gynecology, ENT, ophthalmology, neurosurgery, pediatric surgery, dermatology, and psychiatry." },
       { property: "og:title", content: "Departments — Dr. Amanuel Hospital" },
       { property: "og:url", content: "/departments" },
     ],
@@ -26,7 +26,7 @@ function DepartmentsPage() {
   // Merge translated names/descriptions with the icons from site-data
   const depts = translatedDepartments[lang].map((d, i) => ({
     ...d,
-    icon: departments[i].icon,
+    icon: departments.find((item) => item.name === translatedDepartments.en[i]?.name)?.icon ?? departments[i].icon,
   }));
 
   return (
