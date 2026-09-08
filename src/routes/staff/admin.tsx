@@ -61,6 +61,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { AddStaffModal } from "@/components/admin/AddStaffModal";
+import { normalizeStaffRole } from "@/lib/staff-roles";
 
 export const Route = createFileRoute("/staff/admin")({
   head: () => ({
@@ -157,11 +158,11 @@ function AdminDashboardPage() {
   const totalStaff = staffAccounts?.length ?? 0;
   const activeStaff = staffAccounts?.filter((s) => s.isActive).length ?? 0;
   const inactiveStaff = staffAccounts?.filter((s) => !s.isActive).length ?? 0;
-  const receptionCount = staffAccounts?.filter((s) => s.role?.toLowerCase() === "reception").length ?? 0;
-  const cashierCount = staffAccounts?.filter((s) => s.role?.toLowerCase() === "cashier").length ?? 0;
-  const doctorCount = staffAccounts?.filter((s) => s.role?.toLowerCase() === "doctor").length ?? 0;
-  const labCount = staffAccounts?.filter((s) => s.role?.toLowerCase() === "laboratory").length ?? 0;
-  const pharmacyCount = staffAccounts?.filter((s) => s.role?.toLowerCase() === "pharmacy").length ?? 0;
+  const receptionCount = staffAccounts?.filter((s) => normalizeStaffRole(s.role) === "reception").length ?? 0;
+  const cashierCount = staffAccounts?.filter((s) => normalizeStaffRole(s.role) === "cashier").length ?? 0;
+  const doctorCount = staffAccounts?.filter((s) => normalizeStaffRole(s.role) === "doctor").length ?? 0;
+  const labCount = staffAccounts?.filter((s) => normalizeStaffRole(s.role) === "laboratory").length ?? 0;
+  const pharmacyCount = staffAccounts?.filter((s) => normalizeStaffRole(s.role) === "pharmacy").length ?? 0;
 
   // Filter staff accounts with safe navigation
   const filteredStaff = (staffAccounts || []).filter((staff) => {
@@ -169,7 +170,7 @@ function AdminDashboardPage() {
       staff.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       staff.displayName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       staff.role?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesRole = roleFilter === "all" || staff.role?.toLowerCase() === roleFilter.toLowerCase();
+    const matchesRole = roleFilter === "all" || normalizeStaffRole(staff.role) === roleFilter;
     return matchesSearch && matchesRole;
   });
 
@@ -317,7 +318,7 @@ function AdminDashboardPage() {
   };
 
   const getRoleBadgeColor = (role: string) => {
-    switch (role?.toLowerCase()) {
+    switch (normalizeStaffRole(role) || role?.toLowerCase()) {
       case "admin":
         return "bg-purple-500/10 text-purple-600 border-purple-500/20";
       case "doctor":

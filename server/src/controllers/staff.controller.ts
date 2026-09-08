@@ -79,15 +79,14 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
         }
 
         const validRoles = ['admin', 'reception', 'cashier', 'doctor', 'laboratory', 'pharmacy', 'staff'];
-        if (!validRoles.includes(role)) {
+        if (!validRoles.includes(String(role).toLowerCase())) {
             return res.status(400).json({
                 success: false,
                 error: `Invalid role. Must be one of: ${validRoles.join(', ')}`,
             });
         }
 
-        // Normalize role to uppercase for consistency with database enum
-        const formattedRole = role.toUpperCase();
+        const formattedRole = String(role).toLowerCase();
 
         // Check if username already exists
         const existingUser = await prisma.staffAccount.findUnique({
@@ -125,7 +124,7 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
         });
 
         // If role is doctor, attempt to create linked doctor record safely
-        if (formattedRole === 'DOCTOR') {
+        if (formattedRole === 'doctor') {
             try {
                 const specialty = req.body.specialty || req.body.specialization || 'General Practice';
                 const experience = req.body.experience ? String(req.body.experience) : '5+ years';
@@ -240,8 +239,7 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // Normalize role to uppercase for consistency with database enum
-        const formattedRole = role.toUpperCase();
+        const formattedRole = role.toLowerCase();
 
         // Check if staff exists safely via BigInt or username
         const existingStaff = await findStaffAccount(rawId);
@@ -287,8 +285,8 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
             },
         });
 
-        // Update or create Doctor profile if role is DOCTOR
-        if (formattedRole === 'DOCTOR') {
+        // Update or create Doctor profile if role is doctor
+        if (formattedRole === 'doctor') {
             try {
                 await prisma.doctor.upsert({
                     where: { username: updatedStaff.username },
@@ -428,10 +426,10 @@ export const toggleStaffStatus = async (req: AuthRequest, res: Response) => {
         const newStatus = isActive !== undefined ? isActive : !existingStaff.isActive;
 
         // Prevent deactivating the last admin
-        if (existingStaff.role === 'ADMIN' && !newStatus) {
+        if (existingStaff.role?.toLowerCase() === 'admin' && !newStatus) {
             const activeAdminCount = await prisma.staffAccount.count({
                 where: {
-                    role: 'ADMIN',
+                    role: { in: ['ADMIN', 'admin'] },
                     isActive: true,
                 },
             });
@@ -506,10 +504,10 @@ export const deleteStaffAccount = async (req: AuthRequest, res: Response) => {
         }
 
         // Prevent deleting the last admin
-        if (existingStaff.role === 'ADMIN') {
+        if (existingStaff.role?.toLowerCase() === 'admin') {
             const activeAdminCount = await prisma.staffAccount.count({
                 where: {
-                    role: 'ADMIN',
+                    role: { in: ['ADMIN', 'admin'] },
                     isActive: true,
                 },
             });
@@ -523,7 +521,7 @@ export const deleteStaffAccount = async (req: AuthRequest, res: Response) => {
         }
 
         // If staff is doctor, delete linked doctor record first
-        if (existingStaff.role === 'DOCTOR' || existingStaff.role === 'doctor') {
+        if (existingStaff.role?.toLowerCase() === 'doctor') {
             try {
                 await prisma.doctor.deleteMany({
                     where: { username: existingStaff.username },

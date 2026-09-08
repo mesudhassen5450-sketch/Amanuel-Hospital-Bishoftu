@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { doctors } from "./site-data";
 import { supabase } from "./supabase";
-import { useStaffAuth } from "./staff-auth";
+import { normalizeStaffRole } from "./staff-roles";
 import { getDoctorMetadata, isStaffDeletedLocally } from "./doctor-metadata";
+import { apiFetch, handleApiResponse } from "./api/client";
 
 export interface DoctorAccount {
   id: number | string;
@@ -27,59 +27,71 @@ export function useDoctorsPresence() {
     try {
       setLoading(true);
 
-      // Fetch directly from Supabase staff_accounts (Express /api/doctors doesn't exist)
       const { data, error } = await supabase
         .from("staff_accounts")
         .select("id, display_name, username, role, is_active, is_online, last_seen")
-        .in("role", ["DOCTOR", "doctor", "Doctor"])
         .eq("is_active", true)
         .order("created_at", { ascending: true });
 
+      let staffRows: any[] = data || [];
       if (error) {
         console.error("[Doctors] Supabase error:", error);
-        setDoctorsList([]);
-        return;
+        try {
+          const response = await apiFetch("/api/doctors", { method: "GET" });
+          const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
+          setDoctorsList(result.doctors || []);
+          return;
+        } catch {
+          setDoctorsList([]);
+          return;
+        }
       }
 
-      if (data && data.length > 0) {
-        const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
-        const activeDocs = data.filter(
-          (doc: any) =>
-            doc.role?.toUpperCase() !== "DELETED" &&
-            doc.username !== "[DELETED]" &&
-            !isStaffDeletedLocally(doc.id, doc.username)
-        );
-        const doctorsFromDB = activeDocs.map((doc: any, i: number) => {
-          const meta = getDoctorMetadata(doc.username);
-          const rawExp = meta?.experience;
-          let expVal = rawExp;
-          if (expVal) {
-            if (typeof expVal === "number") {
-              expVal = `${expVal}+ years experience`;
-            } else {
-              expVal = String(expVal).trim();
-              if (expVal && !expVal.toLowerCase().includes("year")) {
-                expVal = `${expVal} years experience`;
-              }
+      staffRows = staffRows.filter(
+        (doc: any) =>
+          normalizeStaffRole(doc.role) === "doctor" &&
+          doc.role?.toUpperCase() !== "DELETED" &&
+          doc.username !== "[DELETED]" &&
+          !isStaffDeletedLocally(doc.id, doc.username)
+      );
+
+      const { data: profiles } = await supabase
+        .from("doctors")
+        .select("username, specialty, experience, bio, is_available");
+      const profileMap = new Map(
+        (profiles || []).map((p: any) => [String(p.username || "").toLowerCase(), p])
+      );
+
+      const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
+      const doctorsFromDB = staffRows.map((doc: any, i: number) => {
+        const profile = profileMap.get(String(doc.username || "").toLowerCase());
+        const meta = getDoctorMetadata(doc.username);
+        const rawExp = profile?.experience || meta?.experience;
+        let expVal = rawExp;
+        if (expVal) {
+          if (typeof expVal === "number") {
+            expVal = `${expVal}+ years experience`;
+          } else {
+            expVal = String(expVal).trim();
+            if (expVal && !expVal.toLowerCase().includes("year")) {
+              expVal = `${expVal} years experience`;
             }
           }
-          return {
-            id: doc.id.toString(),
-            username: doc.username,
-            name: doc.display_name || doc.username,
-            specialty: meta?.specialty || "General Practice",
-            experience: expVal || "5+ years experience",
-            bio: meta?.bio || "",
-            isOnline: Boolean(doc.is_online),
-            isAvailable: true,
-            photo: photos[i % photos.length],
-            lastSeen: doc.last_seen,
-          };
-        });
-        setDoctorsList(doctorsFromDB);
-      } else {
-        setDoctorsList([]);
-      }
+        }
+        return {
+          id: doc.id.toString(),
+          username: doc.username,
+          name: doc.display_name || doc.username,
+          specialty: profile?.specialty || meta?.specialty || "General Practice",
+          experience: expVal || "5+ years experience",
+          bio: profile?.bio || meta?.bio || "",
+          isOnline: Boolean(doc.is_online),
+          isAvailable: profile?.is_available ?? true,
+          photo: photos[i % photos.length],
+          lastSeen: doc.last_seen,
+        };
+      });
+      setDoctorsList(doctorsFromDB);
     } catch (err) {
       console.error("[Doctors] Fetch error:", err);
       setDoctorsList([]);
@@ -102,9 +114,18 @@ export function useDoctorsPresence() {
           schema: 'public',
           table: 'staff_accounts',
         },
-        (payload) => {
-          console.log('Staff DB change detected:', payload.eventType, payload);
-          // Re-fetch doctor list whenever a doctor is added, updated, or removed in Admin
+        () => {
+          fetchDoctors();
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'doctors',
+        },
+        () => {
           fetchDoctors();
         }
       )
