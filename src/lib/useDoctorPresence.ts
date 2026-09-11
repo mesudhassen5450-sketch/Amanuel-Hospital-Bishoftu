@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "./supabase";
+import { supabase, isSupabaseConfigured } from "./supabase";
 import { normalizeStaffRole } from "./staff-roles";
 import { getDoctorMetadata, isStaffDeletedLocally } from "./doctor-metadata";
 import { apiFetch, handleApiResponse } from "./api/client";
@@ -26,6 +26,18 @@ export function useDoctorsPresence() {
   const fetchDoctors = useCallback(async () => {
     try {
       setLoading(true);
+
+      // If Supabase is not configured, skip directly to the REST API fallback
+      if (!isSupabaseConfigured) {
+        try {
+          const response = await apiFetch("/api/doctors", { method: "GET" });
+          const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
+          setDoctorsList(result.doctors || []);
+        } catch {
+          setDoctorsList([]);
+        }
+        return;
+      }
 
       const { data, error } = await supabase
         .from("staff_accounts")
@@ -55,35 +67,65 @@ export function useDoctorsPresence() {
           !isStaffDeletedLocally(doc.id, doc.username)
       );
 
-      const { data: profiles } = await supabase
+      const { data: profiles, error: profilesError } = await supabase
         .from("doctors")
-        .select("username, specialty, experience, bio, is_available");
+        .select(
+          "username, specialty, experience_years, consultation_fee, rating, status, bio, is_available"
+        );
+
+      if (profilesError) {
+        // Likely the new columns don't exist yet (migration pending).
+        // Log a clear message and fall back to the base columns only.
+        console.warn(
+          "[Doctors] doctors table query failed — new columns may not be migrated yet.\n" +
+            "Run supabase/migrations/add_doctor_profile_columns.sql in your Supabase SQL Editor.\n" +
+            "Error:", profilesError.message
+        );
+      }
+
+      // If the extended query failed, retry with only the columns that have always existed
+      let resolvedProfiles = profiles;
+      if (profilesError || !profiles) {
+        const { data: fallbackProfiles } = await supabase
+          .from("doctors")
+          .select("username, specialty, experience, bio, is_available");
+        resolvedProfiles = fallbackProfiles;
+      }
+
       const profileMap = new Map(
-        (profiles || []).map((p: any) => [String(p.username || "").toLowerCase(), p])
+        (resolvedProfiles || []).map((p: any) => [String(p.username || "").toLowerCase(), p])
       );
 
       const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
       const doctorsFromDB = staffRows.map((doc: any, i: number) => {
         const profile = profileMap.get(String(doc.username || "").toLowerCase());
         const meta = getDoctorMetadata(doc.username);
-        const rawExp = profile?.experience || meta?.experience;
-        let expVal = rawExp;
-        if (expVal) {
-          if (typeof expVal === "number") {
-            expVal = `${expVal}+ years experience`;
-          } else {
-            expVal = String(expVal).trim();
-            if (expVal && !expVal.toLowerCase().includes("year")) {
-              expVal = `${expVal} years experience`;
-            }
+
+        // Prefer experience_years (numeric) from DB; fall back to legacy string or metadata
+        const rawExpYears = profile?.experience_years;
+        const rawExpLegacy = meta?.experience;
+        let expVal: string;
+        if (rawExpYears != null) {
+          expVal = `${rawExpYears}+ years experience`;
+        } else if (rawExpLegacy) {
+          expVal = String(rawExpLegacy).trim();
+          if (expVal && !expVal.toLowerCase().includes("year")) {
+            expVal = `${expVal} years experience`;
           }
+        } else {
+          expVal = "5+ years experience";
         }
+
         return {
           id: doc.id.toString(),
           username: doc.username,
           name: doc.display_name || doc.username,
           specialty: profile?.specialty || meta?.specialty || "General Practice",
-          experience: expVal || "5+ years experience",
+          experienceYears: rawExpYears ?? null,
+          experience: expVal,
+          consultationFee: profile?.consultation_fee ?? null,
+          rating: profile?.rating ?? null,
+          status: profile?.status ?? null,
           bio: profile?.bio || meta?.bio || "",
           isOnline: Boolean(doc.is_online),
           isAvailable: profile?.is_available ?? true,
@@ -103,6 +145,9 @@ export function useDoctorsPresence() {
   // Initial fetch and Realtime subscription
   useEffect(() => {
     fetchDoctors();
+
+    // Only subscribe to Realtime when Supabase is properly configured
+    if (!isSupabaseConfigured) return;
 
     // Subscribe to Supabase Realtime for staff_accounts INSERT, UPDATE, DELETE events
     const channel = supabase
@@ -160,6 +205,8 @@ export function useDoctorPresence(doctorUsername: string | undefined, isAvailabl
 
   useEffect(() => {
     if (!doctorUsername) return;
+    // Skip all Supabase calls when credentials are not configured
+    if (!isSupabaseConfigured) return;
 
     // 1. Immediately set online state on mount
     const setOnline = async () => {

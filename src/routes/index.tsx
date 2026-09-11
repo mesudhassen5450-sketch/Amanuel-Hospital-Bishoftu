@@ -16,7 +16,7 @@ import {
 import {
   Carousel, CarouselContent, CarouselItem, CarouselNext, CarouselPrevious,
 } from "@/components/ui/carousel";
-import { services, doctors } from "@/lib/site-data";
+import { services } from "@/lib/site-data";
 import { useDoctorsPresence } from "@/lib/useDoctorPresence";
 import { useLanguage } from "@/lib/language-context";
 import { t, translations, translatedFaqs, translatedTestimonials, translatedStats } from "@/lib/translations";

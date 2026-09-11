@@ -36,7 +36,7 @@ function GalleryPage() {
       <section className="py-20">
         <div className="mx-auto max-w-7xl columns-1 gap-5 px-4 sm:columns-2 lg:columns-3 lg:px-8 [&>div]:mb-5">
           {galleryImages.map((img, i) => (
-            <Reveal key={img.src} delay={(i % 3) * 60}>
+            <Reveal key={img.id} delay={(i % 3) * 60}>
               <button
                 onClick={() => setSelected(img)}
                 className="img-zoom block w-full rounded-2xl focus-visible:outline-2 focus-visible:outline-ring"

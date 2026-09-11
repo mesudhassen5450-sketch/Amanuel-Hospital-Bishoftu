@@ -108,10 +108,22 @@ export interface Doctor {
   id: string;
   name: string;
   specialty: string;
-  experience: number;
+  /** Numeric years of experience (from DB), or null if not set */
+  experienceYears: number | null;
+  /** Display-ready string e.g. "10+ years experience" */
+  experience: string;
+  /** Per-consultation fee in ETB, or null if not set */
+  consultationFee: number | null;
+  /** Star rating (0–5), or null if not set */
+  rating: number | null;
+  /** Doctor profile status e.g. "active", "on_leave" */
+  status: string | null;
+  bio: string;
   availableToday: boolean;
   isOnline: boolean;
+  isAvailable: boolean;
   photo: string;
+  lastSeen?: string | null;
 }
 
 export const doctors: Doctor[] = [];
@@ -248,6 +260,7 @@ export const vacancies: Vacancy[] = [
 ];
 
 export interface GalleryImage {
+  id: string;
   src: string;
   alt: string;
   width: number;
@@ -255,13 +268,13 @@ export interface GalleryImage {
 }
 
 export const galleryImages: GalleryImage[] = [
-  { src: galleryLab, alt: "Hospital laboratory with modern microscopes", width: 900, height: 1200 },
-  { src: gallerySurgery, alt: "Modern operating theater with surgical lights", width: 1200, height: 800 },
-  { src: galleryPediatrics, alt: "Nurse caring for a child in the pediatric ward", width: 1200, height: 900 },
-  { src: galleryRadiology, alt: "Hospital medical equipment", width: 900, height: 1100 },
-  { src: galleryPharmacy, alt: "Hospital pharmacy with organized medicine shelves", width: 1200, height: 800 },
-  { src: galleryWard, alt: "Bright modern patient room", width: 900, height: 1200 },
-  { src: aboutLobby, alt: "Hospital reception lobby", width: 1200, height: 900 },
+  { id: "lab", src: galleryLab, alt: "Hospital laboratory with modern microscopes", width: 900, height: 1200 },
+  { id: "surgery", src: gallerySurgery, alt: "Modern operating theater with surgical lights", width: 1200, height: 800 },
+  { id: "pediatrics", src: galleryPediatrics, alt: "Nurse caring for a child in the pediatric ward", width: 1200, height: 900 },
+  { id: "radiology", src: galleryRadiology, alt: "Hospital medical equipment", width: 900, height: 1100 },
+  { id: "pharmacy", src: galleryPharmacy, alt: "Hospital pharmacy with organized medicine shelves", width: 1200, height: 800 },
+  { id: "ward", src: galleryWard, alt: "Bright modern patient room", width: 900, height: 1200 },
+  { id: "lobby", src: aboutLobby, alt: "Hospital reception lobby", width: 1200, height: 900 },
 ];
 
 export interface Testimonial {

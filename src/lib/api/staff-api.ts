@@ -22,6 +22,8 @@ export interface StaffAccount {
   updatedAt: string;
   specialty?: string;
   experience?: string;
+  /** Numeric years of experience stored in the doctors.experience_years column */
+  experienceYears?: number | null;
   bio?: string;
 }
 
@@ -33,6 +35,8 @@ export interface CreateStaffData {
   isActive: boolean;
   specialty?: string;
   experience?: string;
+  /** Numeric value sent to doctors.experience_years */
+  experienceYears?: number | null;
   bio?: string;
 }
 
@@ -43,6 +47,8 @@ export interface UpdateStaffData {
   isActive: boolean;
   specialty?: string;
   experience?: string;
+  /** Numeric value sent to doctors.experience_years */
+  experienceYears?: number | null;
   bio?: string;
 }
 
@@ -115,19 +121,32 @@ async function fetchDoctorProfiles(): Promise<Map<string, { specialty?: string; 
 
 async function persistDoctorProfile(
   username: string,
-  data: { specialty?: string; experience?: string; bio?: string }
+  data: { specialty?: string; experience?: string; experienceYears?: number | null; bio?: string }
 ): Promise<void> {
   const cleanUsername = username.toLowerCase().trim();
-  setDoctorMetadata(cleanUsername, data);
+  setDoctorMetadata(cleanUsername, { specialty: data.specialty, experience: data.experience, bio: data.bio });
 
-  const payload = {
+  // Build a display string from the numeric value when available
+  const experienceStr =
+    data.experienceYears != null
+      ? data.experienceYears >= 30
+        ? "30+ years experience"
+        : `${data.experienceYears}+ years experience`
+      : data.experience || "5+ years experience";
+
+  const payload: Record<string, any> = {
     username: cleanUsername,
     specialty: data.specialty || "General Practice",
-    experience: data.experience || "5+ years experience",
+    experience: experienceStr,
     bio: data.bio || "",
     is_available: true,
     updated_at: new Date().toISOString(),
   };
+
+  // Write the numeric column only when a real value is provided
+  if (data.experienceYears != null) {
+    payload.experience_years = data.experienceYears;
+  }
 
   const { error: tableError } = await supabase.from("doctors").upsert(payload, { onConflict: "username" });
   if (!tableError) return;
@@ -280,6 +299,7 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
     await persistDoctorProfile(cleanUsername, {
       specialty: data.specialty,
       experience: data.experience,
+      experienceYears: data.experienceYears,
       bio: data.bio,
     });
   }
@@ -353,6 +373,7 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
     await persistDoctorProfile(cleanUsername, {
       specialty: data.specialty,
       experience: data.experience,
+      experienceYears: data.experienceYears,
       bio: data.bio,
     });
   }

@@ -55,9 +55,10 @@ function DoctorsPage() {
       ...doc,
       name: doc.name.startsWith("Dr.") ? doc.name.replace("Dr. ", "") : doc.name,
       specialty: doc.specialty || 'General Practice',
-      experience: doc.experience
-        ? (typeof doc.experience === 'number' ? `${doc.experience}+ years experience` : String(doc.experience))
-        : '5+ years experience',
+      experience: doc.experience || '5+ years experience',
+      consultationFee: doc.consultationFee ?? null,
+      rating: doc.rating ?? null,
+      status: doc.status ?? null,
       availableToday: doc.isOnline ?? true,
     };
   });
@@ -191,6 +192,10 @@ function DoctorsPage() {
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                         Online
                       </span>
+                    ) : doc.status && doc.status !== "active" ? (
+                      <span className="flex items-center gap-1 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-700 text-xs font-medium rounded-full shrink-0 capitalize">
+                        {doc.status.replace(/_/g, " ")}
+                      </span>
                     ) : (
                       <span className="flex items-center gap-1 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700 text-xs font-medium rounded-full shrink-0">
                         Offline
@@ -225,10 +230,10 @@ function DoctorsPage() {
                     <span>{doc.experience}</span>
                     <span className="flex items-center gap-1 text-amber-500 font-bold">
                       <Star className="h-3 w-3 fill-amber-500" />
-                      4.9
+                      {doc.rating != null ? doc.rating.toFixed(1) : "N/A"}
                     </span>
                     <span className="font-semibold text-slate-900 dark:text-white">
-                      100 ETB
+                      {doc.consultationFee != null ? `${doc.consultationFee} ETB` : "100 ETB"}
                     </span>
                   </div>
                 </div>

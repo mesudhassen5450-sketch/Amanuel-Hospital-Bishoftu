@@ -17,7 +17,6 @@ import { useLanguage } from "@/lib/language-context";
 import { t } from "@/lib/translations";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import { doctors } from "@/lib/site-data";
 import { useDoctorsPresence } from "@/lib/useDoctorPresence";
 import { NotificationPermissionBanner } from "@/components/NotificationPermissionBanner";
 
@@ -129,7 +128,8 @@ function BookingPage() {
     const dbPaymentMethod = PAYMENT_DB_MAP[selectedPayment];
     const appointmentDate = format(selectedDate, "yyyy-MM-dd");
 
-    const selectedDoctor = doctors.find((d) => d.id === selectedDoctorId);
+    // Use live doctor list from database
+    const selectedDoctor = doctorsList.find((d) => d.id === selectedDoctorId);
     const doctorIdToPass = selectedDoctor?.id || selectedDoctorId || "doctor";
 
     try {

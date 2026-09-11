@@ -93,9 +93,9 @@ export function AvailableDoctorsModal({ open, onOpenChange }: AvailableDoctorsMo
                     <div className="flex items-center gap-4 text-xs text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
-                        Video Call (100 ETB)
+                        {doctor.consultationFee != null ? `Video Call (${doctor.consultationFee} ETB)` : "Video Call (100 ETB)"}
                       </span>
-                      <span>⭐ 4.9</span>
+                      <span>⭐ {doctor.rating != null ? doctor.rating.toFixed(1) : "4.9"}</span>
                     </div>
                   </div>
                   <Button

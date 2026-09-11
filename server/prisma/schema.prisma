@@ -90,15 +90,19 @@ model StaffAccount {
 }
 
 model Doctor {
-  id           String    @id @default(uuid())
-  username     String    @unique
-  departmentId String?   @map("department_id")
-  specialty    String
-  experience   String?
-  bio          String?
-  isAvailable  Boolean   @default(true) @map("is_available")
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id              String    @id @default(uuid())
+  username        String    @unique
+  departmentId    String?   @map("department_id")
+  specialty       String
+  experience      String?
+  experienceYears Int?      @map("experience_years")
+  consultationFee Decimal?  @map("consultation_fee") @db.Decimal(10, 2)
+  rating          Decimal?  @db.Decimal(3, 2)
+  status          String?   @default("active")
+  bio             String?
+  isAvailable     Boolean   @default(true) @map("is_available")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([username])
   @@map("doctors")

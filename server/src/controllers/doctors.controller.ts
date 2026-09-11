@@ -38,6 +38,21 @@ export const getAllDoctors = async (req: Request, res: Response) => {
                         in: doctorStaff.map(s => s.username),
                     },
                 },
+                select: {
+                    username: true,
+                    specialty: true,
+                    experience: true,
+                    experienceYears: true,
+                    consultationFee: true,
+                    rating: true,
+                    status: true,
+                    bio: true,
+                    isAvailable: true,
+                },
+                orderBy: {
+                    // Preserve first-come, first-served insertion order
+                    createdAt: 'asc',
+                },
             });
         } catch (e: any) {
             console.warn('[Doctors Controller] Optional Doctor table query warning:', e.message);
@@ -51,12 +66,32 @@ export const getAllDoctors = async (req: Request, res: Response) => {
             const photo = photos[index % photos.length];
             const profile = profileMap.get(staff.username.toLowerCase());
 
+            // Resolve experience string: prefer numeric experience_years, then legacy string
+            const rawExpYears = profile?.experienceYears;
+            const rawExpLegacy = profile?.experience;
+            let experience: string;
+            if (rawExpYears != null) {
+                experience = `${rawExpYears}+ years experience`;
+            } else if (rawExpLegacy) {
+                experience = rawExpLegacy.toLowerCase().includes('year')
+                    ? rawExpLegacy
+                    : `${rawExpLegacy} years experience`;
+            } else {
+                experience = '5+ years experience';
+            }
+
             return {
                 id: staff.id.toString(),
                 username: staff.username,
                 name: staff.displayName || staff.username,
                 specialty: profile?.specialty || 'General Practice',
-                experience: profile?.experience || '5+ years experience',
+                experienceYears: rawExpYears ?? null,
+                experience,
+                consultationFee: profile?.consultationFee != null
+                    ? Number(profile.consultationFee)
+                    : null,
+                rating: profile?.rating != null ? Number(profile.rating) : null,
+                status: profile?.status ?? null,
                 bio: profile?.bio || 'Dedicated medical specialist at Dr. Amanuel Hospital.',
                 isOnline: Boolean(staff.isOnline),
                 isAvailable: profile?.isAvailable ?? true,

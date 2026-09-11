@@ -14,80 +14,84 @@ import { Loader2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import * as StaffAPI from "@/lib/api/staff-api";
 
+/** Shared list used by both Add and Edit forms */
+export const MEDICAL_SPECIALTIES = [
+  "Cardiology",
+  "Pediatrics",
+  "Internal Medicine",
+  "General Practice",
+  "Dermatology",
+  "Gynecology",
+  "Orthopedics",
+  "Neurology",
+  "Ophthalmology",
+  "Radiology",
+  "Other",
+] as const;
+
+/** Options for the experience_years dropdown (1–29 + 30+) */
+const EXPERIENCE_YEAR_OPTIONS: Array<{ label: string; value: number }> = [
+  ...Array.from({ length: 29 }, (_, i) => ({ label: `${i + 1} year${i === 0 ? "" : "s"}`, value: i + 1 })),
+  { label: "30+ years", value: 30 },
+];
+
+const SELECT_CLASS =
+  "w-full h-10 px-3 rounded-xl border border-input bg-background text-xs font-medium outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50 disabled:cursor-not-allowed";
+
 interface AddStaffModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
 
+const EMPTY_FORM = {
+  displayName: "",
+  username: "",
+  password: "",
+  confirmPassword: "",
+  role: "doctor",
+  isActive: true,
+  specialty: "General Practice" as string,
+  customSpecialty: "" as string,
+  experienceYears: 5 as number,
+  bio: "",
+};
+
 export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps) {
-  const [formData, setFormData] = useState({
-    displayName: "",
-    username: "",
-    password: "",
-    confirmPassword: "",
-    role: "doctor",
-    isActive: true,
-    specialty: "General Practice",
-    experience: "5+ years",
-    bio: "",
-  });
+  const [formData, setFormData] = useState({ ...EMPTY_FORM });
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Validation
-    if (!formData.displayName.trim()) {
-      toast.error("Full name is required");
-      return;
-    }
-    if (!formData.username.trim()) {
-      toast.error("Username is required");
-      return;
-    }
-    if (formData.username.length < 3) {
-      toast.error("Username must be at least 3 characters");
-      return;
-    }
-    if (!formData.password) {
-      toast.error("Password is required");
-      return;
-    }
-    if (formData.password.length < 6) {
-      toast.error("Password must be at least 6 characters");
-      return;
-    }
-    if (formData.password !== formData.confirmPassword) {
-      toast.error("Passwords do not match");
-      return;
-    }
+    if (!formData.displayName.trim()) { toast.error("Full name is required"); return; }
+    if (!formData.username.trim()) { toast.error("Username is required"); return; }
+    if (formData.username.length < 3) { toast.error("Username must be at least 3 characters"); return; }
+    if (!formData.password) { toast.error("Password is required"); return; }
+    if (formData.password.length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    if (formData.password !== formData.confirmPassword) { toast.error("Passwords do not match"); return; }
 
     try {
       setLoading(true);
+      const isDoctor = formData.role === "doctor";
+      
+      // Use custom specialty if "Other" is selected
+      const finalSpecialty = formData.specialty === "Other" 
+        ? formData.customSpecialty.trim() || "General Practice"
+        : formData.specialty;
+      
       await StaffAPI.createStaffAccount({
         username: formData.username.trim(),
         password: formData.password,
         role: formData.role,
         displayName: formData.displayName.trim(),
         isActive: formData.isActive,
-        specialty: formData.role === 'doctor' ? formData.specialty : undefined,
-        experience: formData.role === 'doctor' ? formData.experience : undefined,
-        bio: formData.role === 'doctor' ? formData.bio : undefined,
+        specialty: isDoctor ? finalSpecialty : undefined,
+        experienceYears: isDoctor ? formData.experienceYears : undefined,
+        bio: isDoctor ? formData.bio : undefined,
       });
       toast.success("Staff account created successfully");
-      // Reset form
-      setFormData({
-        displayName: "",
-        username: "",
-        password: "",
-        confirmPassword: "",
-        role: "doctor",
-        isActive: true,
-        specialty: "General Practice",
-        experience: "5+ years",
-        bio: "",
-      });
+      setFormData({ ...EMPTY_FORM });
       onSuccess();
       onClose();
     } catch (error: any) {
@@ -99,17 +103,7 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
 
   const handleClose = () => {
     if (!loading) {
-      setFormData({
-        displayName: "",
-        username: "",
-        password: "",
-        confirmPassword: "",
-        role: "doctor",
-        isActive: true,
-        specialty: "General Practice",
-        experience: "5+ years",
-        bio: "",
-      });
+      setFormData({ ...EMPTY_FORM });
       onClose();
     }
   };
@@ -130,9 +124,7 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
         <form onSubmit={handleSubmit} className="space-y-4 py-2">
           {/* Full Name */}
           <div className="space-y-1.5">
-            <Label htmlFor="displayName" className="text-xs font-semibold">
-              Full Name *
-            </Label>
+            <Label htmlFor="displayName" className="text-xs font-semibold">Full Name *</Label>
             <Input
               id="displayName"
               value={formData.displayName}
@@ -145,9 +137,7 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
 
           {/* Username */}
           <div className="space-y-1.5">
-            <Label htmlFor="username" className="text-xs font-semibold">
-              Username *
-            </Label>
+            <Label htmlFor="username" className="text-xs font-semibold">Username *</Label>
             <Input
               id="username"
               value={formData.username}
@@ -163,14 +153,12 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
 
           {/* Role */}
           <div className="space-y-1.5">
-            <Label htmlFor="role" className="text-xs font-semibold">
-              Role *
-            </Label>
+            <Label htmlFor="role" className="text-xs font-semibold">Role *</Label>
             <select
               id="role"
               value={formData.role}
               onChange={(e) => setFormData({ ...formData, role: e.target.value })}
-              className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs font-semibold outline-none"
+              className={SELECT_CLASS}
               disabled={loading}
             >
               <option value="doctor">Doctor</option>
@@ -189,39 +177,61 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
               <p className="text-xs font-bold text-blue-600 dark:text-blue-400">
                 Doctor Profile Info (Displayed on Public Doctor Page)
               </p>
-              
+
+              {/* Specialty dropdown */}
               <div className="space-y-1">
-                <Label htmlFor="specialty" className="text-xs font-semibold">
-                  Medical Specialty
-                </Label>
-                <Input
+                <Label htmlFor="specialty" className="text-xs font-semibold">Medical Specialty</Label>
+                <select
                   id="specialty"
                   value={formData.specialty}
                   onChange={(e) => setFormData({ ...formData, specialty: e.target.value })}
-                  placeholder="e.g. Cardiologist, Neurologist, General Practice"
-                  className="rounded-xl bg-white dark:bg-slate-900"
+                  className={SELECT_CLASS}
                   disabled={loading}
-                />
+                >
+                  {MEDICAL_SPECIALTIES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
               </div>
 
+              {/* Custom Specialty Input (shown when "Other" is selected) */}
+              {formData.specialty === "Other" && (
+                <div className="space-y-1">
+                  <Label htmlFor="customSpecialty" className="text-xs font-semibold">Custom Specialty *</Label>
+                  <Input
+                    id="customSpecialty"
+                    value={formData.customSpecialty}
+                    onChange={(e) => setFormData({ ...formData, customSpecialty: e.target.value })}
+                    placeholder="Enter custom specialty (e.g. Emergency Medicine)"
+                    className="rounded-xl bg-white dark:bg-slate-900"
+                    disabled={loading}
+                  />
+                </div>
+              )}
+
+              {/* Experience years dropdown */}
               <div className="space-y-1">
-                <Label htmlFor="experience" className="text-xs font-semibold">
+                <Label htmlFor="experienceYears" className="text-xs font-semibold">
                   Years of Experience
                 </Label>
-                <Input
-                  id="experience"
-                  value={formData.experience}
-                  onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
-                  placeholder="e.g. 8+ years"
-                  className="rounded-xl bg-white dark:bg-slate-900"
+                <select
+                  id="experienceYears"
+                  value={formData.experienceYears}
+                  onChange={(e) =>
+                    setFormData({ ...formData, experienceYears: Number(e.target.value) })
+                  }
+                  className={SELECT_CLASS}
                   disabled={loading}
-                />
+                >
+                  {EXPERIENCE_YEAR_OPTIONS.map(({ label, value }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
               </div>
 
+              {/* Bio */}
               <div className="space-y-1">
-                <Label htmlFor="bio" className="text-xs font-semibold">
-                  Bio / Summary
-                </Label>
+                <Label htmlFor="bio" className="text-xs font-semibold">Bio / Summary</Label>
                 <Input
                   id="bio"
                   value={formData.bio}
@@ -236,9 +246,7 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
 
           {/* Password */}
           <div className="space-y-1.5">
-            <Label htmlFor="password" className="text-xs font-semibold">
-              Password *
-            </Label>
+            <Label htmlFor="password" className="text-xs font-semibold">Password *</Label>
             <Input
               id="password"
               type="password"
@@ -252,9 +260,7 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
 
           {/* Confirm Password */}
           <div className="space-y-1.5">
-            <Label htmlFor="confirmPassword" className="text-xs font-semibold">
-              Confirm Password *
-            </Label>
+            <Label htmlFor="confirmPassword" className="text-xs font-semibold">Confirm Password *</Label>
             <Input
               id="confirmPassword"
               type="password"
@@ -282,21 +288,12 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
           </div>
 
           <DialogFooter className="pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleClose}
-              className="rounded-xl text-xs"
-              disabled={loading}
-            >
+            <Button type="button" variant="outline" onClick={handleClose} className="rounded-xl text-xs" disabled={loading}>
               Cancel
             </Button>
             <Button type="submit" className="rounded-xl text-xs font-semibold" disabled={loading}>
               {loading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Creating...
-                </>
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Creating...</>
               ) : (
                 "Create Account"
               )}

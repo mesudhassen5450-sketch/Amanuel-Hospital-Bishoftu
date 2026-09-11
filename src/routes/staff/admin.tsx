@@ -57,10 +57,11 @@ import {
   Building2,
   AlertTriangle,
   Trash2,
+  MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { AddStaffModal } from "@/components/admin/AddStaffModal";
+import { AddStaffModal, MEDICAL_SPECIALTIES } from "@/components/admin/AddStaffModal";
 import { normalizeStaffRole } from "@/lib/staff-roles";
 
 export const Route = createFileRoute("/staff/admin")({
@@ -114,7 +115,8 @@ function AdminDashboardPage() {
     role: "",
     isActive: true,
     specialty: "",
-    experience: "",
+    customSpecialty: "",
+    experienceYears: 5 as number,
     bio: "",
   });
   const [resetPasswordForm, setResetPasswordForm] = useState({
@@ -182,13 +184,18 @@ function AdminDashboardPage() {
 
   const handleEdit = (staff: StaffAccount) => {
     setSelectedStaff(staff);
+    
+    // Check if specialty is not in the predefined list (meaning it's custom)
+    const isCustomSpecialty = staff.specialty && !MEDICAL_SPECIALTIES.includes(staff.specialty as any);
+    
     setEditForm({
       username: staff.username,
       displayName: staff.displayName || "",
       role: staff.role,
       isActive: staff.isActive,
-      specialty: staff.specialty || "",
-      experience: staff.experience || "",
+      specialty: isCustomSpecialty ? "Other" : (staff.specialty || "General Practice"),
+      customSpecialty: isCustomSpecialty ? staff.specialty || "" : "",
+      experienceYears: staff.experienceYears != null ? staff.experienceYears : 5,
       bio: staff.bio || "",
     });
     setEditDialogOpen(true);
@@ -198,13 +205,19 @@ function AdminDashboardPage() {
     if (!selectedStaff) return;
     try {
       setFormLoading(true);
+      
+      // Use custom specialty if "Other" is selected
+      const finalSpecialty = editForm.specialty === "Other" 
+        ? editForm.customSpecialty.trim() || "General Practice"
+        : editForm.specialty;
+      
       await StaffAPI.updateStaffAccount(selectedStaff.id, {
         username: editForm.username,
         role: editForm.role,
         displayName: editForm.displayName,
         isActive: editForm.isActive,
-        specialty: editForm.role.toLowerCase() === 'doctor' ? editForm.specialty : undefined,
-        experience: editForm.role.toLowerCase() === 'doctor' ? editForm.experience : undefined,
+        specialty: editForm.role.toLowerCase() === 'doctor' ? finalSpecialty : undefined,
+        experienceYears: editForm.role.toLowerCase() === 'doctor' ? editForm.experienceYears : undefined,
         bio: editForm.role.toLowerCase() === 'doctor' ? editForm.bio : undefined,
       });
       toast.success("Staff account updated successfully");
@@ -528,7 +541,9 @@ function AdminDashboardPage() {
                 </Badge>
               </div>
             </CardHeader>
-            <div className="overflow-x-auto">
+
+            {/* ── DESKTOP TABLE (md and above) ─────────────────────────── */}
+            <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow className="bg-muted/30">
@@ -678,6 +693,140 @@ function AdminDashboardPage() {
                 </TableBody>
               </Table>
             </div>
+
+            {/* ── MOBILE CARD LIST (below md) ───────────────────────────── */}
+            <div className="md:hidden divide-y divide-border/60">
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-12 text-muted-foreground">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                  <span className="text-sm">Loading staff account data...</span>
+                </div>
+              ) : filteredStaff.length === 0 ? (
+                <div className="py-12 text-center text-sm text-muted-foreground px-6">
+                  {searchQuery || roleFilter !== "all"
+                    ? "No staff accounts matched your filters."
+                    : "No staff accounts found in the database."}
+                </div>
+              ) : (
+                filteredStaff.map((staff) => (
+                  <div key={staff.id} className="px-4 py-3.5 space-y-2.5">
+                    {/* Top row: name + status badges */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-sm text-foreground truncate">
+                          {staff.displayName || "—"}
+                        </p>
+                        <p className="font-mono text-xs text-muted-foreground truncate mt-0.5">
+                          @{staff.username}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                        <Badge className={cn("border font-semibold text-xs capitalize", getRoleBadgeColor(staff.role))}>
+                          {staff.role}
+                        </Badge>
+                        <Badge
+                          className={cn(
+                            "border text-xs font-semibold rounded-full px-2 py-0.5",
+                            staff.isActive
+                              ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                              : "bg-destructive/10 text-destructive border-destructive/20"
+                          )}
+                        >
+                          {staff.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                        {staff.role?.toLowerCase() === "doctor" && (
+                          <Badge
+                            className={cn(
+                              "border text-xs font-semibold rounded-full px-2 py-0.5",
+                              staff.isOnline
+                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                : "bg-slate-500/10 text-slate-500 border-slate-500/20"
+                            )}
+                          >
+                            <span className={cn(
+                              "w-1.5 h-1.5 rounded-full mr-1 inline-block",
+                              staff.isOnline ? "bg-emerald-500 animate-pulse" : "bg-slate-400"
+                            )} />
+                            {staff.isOnline ? "Online" : "Offline"}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Meta row: dates */}
+                    <div className="flex items-center gap-4 text-[11px] text-muted-foreground">
+                      <span className="flex items-center gap-1">
+                        <Calendar className="h-3 w-3" />
+                        {formatDate(staff.createdAt)}
+                      </span>
+                      {staff.lastSeen && (
+                        <span className="flex items-center gap-1">
+                          <Eye className="h-3 w-3" />
+                          {formatDate(staff.lastSeen)}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Action buttons — full-width row, easy to tap */}
+                    <div className="flex items-center gap-1.5 pt-1">
+                      {/* View */}
+                      <button
+                        onClick={() => handleView(staff)}
+                        className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium transition-colors"
+                        title="View Details"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        View
+                      </button>
+
+                      {/* Edit */}
+                      <button
+                        onClick={() => handleEdit(staff)}
+                        className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium transition-colors"
+                        title="Edit Staff Account"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                        Edit
+                      </button>
+
+                      {/* Reset Password */}
+                      <button
+                        onClick={() => handleResetPassword(staff)}
+                        className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-medium transition-colors"
+                        title="Reset Password"
+                      >
+                        <Key className="h-3.5 w-3.5" />
+                        Reset
+                      </button>
+
+                      {/* Enable / Disable — only this button carries semantic colour as a status signal */}
+                      <button
+                        onClick={() => handleToggleStatus(staff)}
+                        className={cn(
+                          "flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl border text-xs font-medium transition-colors",
+                          staff.isActive
+                            ? "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                            : "border-emerald-200 dark:border-emerald-800 bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                        )}
+                        title={staff.isActive ? "Deactivate Account" : "Activate Account"}
+                      >
+                        <Power className="h-3.5 w-3.5" />
+                        {staff.isActive ? "Disable" : "Enable"}
+                      </button>
+
+                      {/* Delete — icon only, slim destructive border, no fill */}
+                      <button
+                        onClick={() => handleDelete(staff)}
+                        className="h-9 w-9 shrink-0 flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-400 dark:text-slate-500 hover:border-red-300 dark:hover:border-red-800 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                        title="Delete Staff Account"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </Card>
         </div>
 
@@ -750,8 +899,9 @@ function AdminDashboardPage() {
 
         {/* Edit Modal */}
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent className="sm:max-w-md rounded-2xl">
-            <DialogHeader>
+          <DialogContent className="sm:max-w-md rounded-2xl flex flex-col max-h-[90vh] p-0 gap-0">
+            {/* Fixed header */}
+            <DialogHeader className="px-6 pt-6 pb-3 shrink-0">
               <DialogTitle className="flex items-center gap-2 font-display">
                 <Edit className="h-5 w-5 text-primary" />
                 Edit Staff Account
@@ -760,7 +910,9 @@ function AdminDashboardPage() {
                 Update account parameters for {selectedStaff?.displayName || selectedStaff?.username}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 py-2">
+
+            {/* Scrollable body */}
+            <div className="flex-1 overflow-y-auto px-6 py-2 space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="edit-username" className="text-xs font-semibold">Username</Label>
                 <Input
@@ -823,40 +975,73 @@ function AdminDashboardPage() {
                   <p className="text-xs font-bold text-blue-600 dark:text-blue-400">
                     Doctor Profile (Shown on Public Doctor Page)
                   </p>
+
+                  {/* Specialty dropdown */}
                   <div className="space-y-1.5">
                     <Label htmlFor="edit-specialty" className="text-xs font-semibold">Medical Specialty</Label>
-                    <input
+                    <select
                       id="edit-specialty"
                       value={editForm.specialty}
                       onChange={(e) => setEditForm({ ...editForm, specialty: e.target.value })}
-                      placeholder="e.g. Cardiologist, General Practice"
-                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none"
-                    />
+                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs font-medium outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      {MEDICAL_SPECIALTIES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
                   </div>
+
+                  {/* Custom Specialty Input (shown when "Other" is selected) */}
+                  {editForm.specialty === "Other" && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="edit-customSpecialty" className="text-xs font-semibold">Custom Specialty *</Label>
+                      <input
+                        id="edit-customSpecialty"
+                        value={editForm.customSpecialty}
+                        onChange={(e) => setEditForm({ ...editForm, customSpecialty: e.target.value })}
+                        placeholder="Enter custom specialty (e.g. Emergency Medicine)"
+                        className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none focus:ring-2 focus:ring-primary/30"
+                      />
+                    </div>
+                  )}
+
+                  {/* Experience years dropdown */}
                   <div className="space-y-1.5">
-                    <Label htmlFor="edit-experience" className="text-xs font-semibold">Years of Experience</Label>
-                    <input
-                      id="edit-experience"
-                      value={editForm.experience}
-                      onChange={(e) => setEditForm({ ...editForm, experience: e.target.value })}
-                      placeholder="e.g. 10+ years"
-                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none"
-                    />
+                    <Label htmlFor="edit-experienceYears" className="text-xs font-semibold">Years of Experience</Label>
+                    <select
+                      id="edit-experienceYears"
+                      value={editForm.experienceYears}
+                      onChange={(e) =>
+                        setEditForm({ ...editForm, experienceYears: Number(e.target.value) })
+                      }
+                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs font-medium outline-none focus:ring-2 focus:ring-primary/30"
+                    >
+                      {Array.from({ length: 29 }, (_, i) => i + 1).map((yr) => (
+                        <option key={yr} value={yr}>
+                          {yr} {yr === 1 ? "year" : "years"}
+                        </option>
+                      ))}
+                      <option value={30}>30+ years</option>
+                    </select>
                   </div>
-                  <div className="space-y-1.5">
+
+                  {/* Bio — extra bottom padding so it clears the footer */}
+                  <div className="space-y-1.5 pb-2">
                     <Label htmlFor="edit-bio" className="text-xs font-semibold">Bio / Summary</Label>
                     <input
                       id="edit-bio"
                       value={editForm.bio}
                       onChange={(e) => setEditForm({ ...editForm, bio: e.target.value })}
                       placeholder="Brief description of expertise..."
-                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none"
+                      className="w-full h-10 px-3 rounded-xl border border-input bg-background text-xs outline-none focus:ring-2 focus:ring-primary/30"
                     />
                   </div>
                 </div>
               )}
             </div>
-            <DialogFooter className="pt-2">
+
+            {/* Fixed footer — always visible */}
+            <DialogFooter className="px-6 py-4 border-t border-border shrink-0">
               <Button variant="outline" onClick={() => setEditDialogOpen(false)} className="rounded-xl text-xs">
                 Cancel
               </Button>
