@@ -218,6 +218,14 @@ function VideoConsultationPage() {
     );
   }
 
+  if (!appointment) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center text-slate-400 bg-slate-950">
+        <p className="text-sm">Appointment not found.</p>
+      </div>
+    );
+  }
+
   // ── Main layout — Full-screen video + chat sidebar ─────────────────────────────
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-slate-950">
