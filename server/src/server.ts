@@ -279,6 +279,15 @@ server.listen(PORT, () => {
   ⚡ Health Check: http://localhost:${PORT}/health
   🔐 Auth Endpoint: http://localhost:${PORT}/api/auth/login
   `);
+
+  // Repair older production DBs missing doctors.experience_years / status / etc.
+  // Without this, Admin "Save Changes" for specialty/bio returns 500 and public
+  // /doctors stays stuck on defaults.
+  import("./utils/doctorProfile.js")
+    .then(({ ensureDoctorSchema }) => ensureDoctorSchema(prisma))
+    .catch((err) =>
+      console.warn("[Server] Doctor schema ensure failed:", err?.message || err)
+    );
 });
 
 // ── Graceful Shutdown Handler ───────────────────────────────────────────────
