@@ -3,6 +3,34 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
+import { JWT_SECRET } from '../utils/auth.js';
+
+async function passwordsMatch(plain: string, storedHash: string | null | undefined): Promise<boolean> {
+    const password = plain.trim();
+    const hash = storedHash?.trim() ?? '';
+    if (!password || !hash) return false;
+
+    if (hash.startsWith('$2a$') || hash.startsWith('$2b$') || hash.startsWith('$2y$')) {
+        try {
+            if (await bcrypt.compare(password, hash)) return true;
+        } catch {
+            // bcryptjs cannot always verify pgcrypto hashes; try SQL crypt next
+        }
+
+        try {
+            const rows = await prisma.$queryRaw<Array<{ ok: boolean }>>`
+                SELECT (crypt(${password}, ${hash}) = ${hash}) AS ok
+            `;
+            if (rows[0]?.ok) return true;
+        } catch {
+            // pgcrypto may be unavailable
+        }
+
+        return false;
+    }
+
+    return hash === password;
+}
 
 export const login = async (req: Request, res: Response) => {
     const { username, password } = req.body;
@@ -27,12 +55,7 @@ export const login = async (req: Request, res: Response) => {
             return res.status(401).json({ error: 'Invalid username or password' });
         }
 
-        let isValidPassword = false;
-        if (staff.passwordHash && (staff.passwordHash.startsWith('$2a$') || staff.passwordHash.startsWith('$2b$'))) {
-            isValidPassword = await bcrypt.compare(password.trim(), staff.passwordHash);
-        } else {
-            isValidPassword = staff.passwordHash === password.trim();
-        }
+        const isValidPassword = await passwordsMatch(password, staff.passwordHash);
 
         if (!isValidPassword) {
             return res.status(401).json({ success: false, message: 'Invalid username or password', error: 'Invalid username or password' });
@@ -48,7 +71,7 @@ export const login = async (req: Request, res: Response) => {
                 username: staff.username, 
                 role: (staff.role || 'ADMIN').toUpperCase() 
             },
-            process.env.JWT_SECRET || 'amanuel_hospital_secure_jwt_secret_2026_key',
+            JWT_SECRET,
             { expiresIn: '24h' }
         );
 

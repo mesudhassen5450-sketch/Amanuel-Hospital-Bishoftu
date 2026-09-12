@@ -335,9 +335,9 @@ export const resetStaffPassword = async (req: AuthRequest, res: Response) => {
         const rawId = Array.isArray(req.params.id) 
             ? req.params.id[0] 
             : req.params.id;
-        const { newPassword } = req.body;
+        const { newPassword, username } = req.body;
 
-        if (!rawId) {
+        if (!rawId && !username) {
             return res.status(400).json({
                 success: false,
                 error: 'Valid staff ID is required',
@@ -358,8 +358,18 @@ export const resetStaffPassword = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // Check if staff exists
-        const existingStaff = await findStaffAccount(rawId);
+        // ID first, then username so reset updates the same row login checks
+        let existingStaff = rawId ? await findStaffAccount(rawId) : null;
+        if (!existingStaff && username) {
+            existingStaff = await prisma.staffAccount.findFirst({
+                where: {
+                    username: {
+                        equals: String(username).trim(),
+                        mode: 'insensitive',
+                    },
+                },
+            });
+        }
 
         if (!existingStaff) {
             return res.status(404).json({

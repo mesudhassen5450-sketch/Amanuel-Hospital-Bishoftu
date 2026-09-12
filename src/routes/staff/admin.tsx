@@ -253,12 +253,18 @@ function AdminDashboardPage() {
       setFormLoading(true);
       await StaffAPI.resetStaffPassword(selectedStaff.id, {
         newPassword: resetPasswordForm.newPassword,
+        username: selectedStaff.username,
       });
       toast.success("Password reset successfully");
       setResetPasswordForm({ newPassword: "", confirmPassword: "" });
       setResetPasswordDialogOpen(false);
     } catch (error: any) {
-      toast.error(error?.message || "Failed to reset password");
+      const msg = error?.message || "Failed to reset password";
+      if (/token|unauthorized|access denied/i.test(msg)) {
+        toast.error("Please log out, sign in as admin again, then reset the password.");
+      } else {
+        toast.error(msg);
+      }
     } finally {
       setFormLoading(false);
     }

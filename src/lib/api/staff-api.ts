@@ -54,6 +54,7 @@ export interface UpdateStaffData {
 
 export interface ResetPasswordData {
   newPassword: string;
+  username?: string;
 }
 
 export interface ToggleStatusData {
@@ -389,6 +390,24 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
 export const resetStaffPassword = async (id: string | number, data: ResetPasswordData): Promise<void> => {
   const targetStr = String(id).trim();
   const numId = parseInt(targetStr, 10);
+  const lookup = data.username?.trim() || (!isNaN(numId) ? "" : targetStr);
+  let lastError = "";
+
+  // Login uses Render/Express. That write must succeed before the UI reports success.
+  try {
+    const response = await apiFetch(`/api/staff/${id}/password`, {
+      method: "PUT",
+      body: JSON.stringify({
+        newPassword: data.newPassword,
+        username: lookup || undefined,
+      }),
+    });
+    await handleApiResponse<{ success: boolean; message: string }>(response);
+    return;
+  } catch (apiErr: any) {
+    lastError = apiErr?.message || "Failed to update login password on the server";
+    console.warn("[Staff API] Express resetPassword failed:", apiErr);
+  }
 
   if (!isNaN(numId)) {
     const { data: rpcResult, error } = await supabase.rpc("reset_staff_password", {
@@ -397,27 +416,13 @@ export const resetStaffPassword = async (id: string | number, data: ResetPasswor
     });
     const parsed = parseRpcPayload(rpcResult);
     if (!error && parsed.success) return;
+    lastError = parsed.error || error?.message || lastError;
   }
 
-  try {
-    const response = await apiFetch(`/api/staff/${id}/password`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-    await handleApiResponse<{ success: boolean; message: string }>(response);
-    return;
-  } catch (apiErr) {
-    console.warn("[Staff API] Express API resetPassword failed, using Supabase fallback:", apiErr);
-  }
-
-  let query = supabase.from("staff_accounts").update({ password_hash: data.newPassword });
-  if (!isNaN(numId)) {
-    query = query.eq("id", numId);
-  } else {
-    query = query.ilike("username", targetStr);
-  }
-  const { error } = await query;
-  if (error) throw new Error(error.message || "Failed to reset password");
+  throw new Error(
+    lastError ||
+      "Password reset did not update the login account. Sign in as admin again, then reset."
+  );
 };
 
 /**

@@ -52,7 +52,7 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     },
   });
 
-  if (response.status === 401 && !path.includes("/auth/login")) {
+  if (response.status === 401 && !path.includes("/auth/login") && !path.includes("/password")) {
     handleUnauthorized();
   }
 

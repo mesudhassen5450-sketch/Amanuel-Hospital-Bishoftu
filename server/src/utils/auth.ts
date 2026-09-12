@@ -1,7 +1,7 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'amanuel_hospital_secure_jwt_secret_2026_key';
+export const JWT_SECRET = process.env.JWT_SECRET || 'amanuel_hospital_secure_jwt_secret_2026_key';
 const JWT_EXPIRES_IN = '1d';
 
 export interface TokenPayload {

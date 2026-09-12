@@ -254,9 +254,41 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION public.reset_staff_password(
+  p_id bigint,
+  p_new_password text
+)
+RETURNS json
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_account public.staff_accounts%ROWTYPE;
+BEGIN
+  IF p_new_password IS NULL OR length(trim(p_new_password)) < 6 THEN
+    RETURN json_build_object('success', false, 'error', 'Password must be at least 6 characters');
+  END IF;
+
+  SELECT * INTO v_account FROM public.staff_accounts WHERE id = p_id;
+  IF NOT FOUND THEN
+    RETURN json_build_object('success', false, 'error', 'Staff account not found');
+  END IF;
+
+  UPDATE public.staff_accounts
+  SET password_hash = crypt(trim(p_new_password), gen_salt('bf', 10)),
+      updated_at = now()
+  WHERE id = p_id
+  RETURNING * INTO v_account;
+
+  RETURN json_build_object('success', true, 'message', 'Password reset successfully');
+END;
+$$;
+
 GRANT EXECUTE ON FUNCTION public.normalize_hospital_role(text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_staff_account(text, text, text, text, boolean) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.update_staff_account(bigint, text, text, text, boolean) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.delete_staff_account(bigint) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.reset_staff_password(bigint, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.upsert_doctor_profile(text, text, text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.get_all_staff_accounts() TO anon, authenticated;

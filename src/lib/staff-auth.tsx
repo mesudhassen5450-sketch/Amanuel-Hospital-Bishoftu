@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
 import { normalizeStaffRole, type StaffRole } from "./staff-roles";
-import { supabase } from "./supabase";
 
 export type { StaffRole };
 
@@ -184,112 +183,52 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ username: cleanUsername, password: cleanPassword }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.token && result.user) {
-          localStorage.setItem('token', result.token);
-          const now = Date.now();
-          const normalizedRole = normalizeStaffRole(result.user.role as string);
-          if (!normalizedRole) {
-            return { success: false, error: "Unknown staff role returned by server." };
-          }
-          const session: SessionData = {
-            username:    result.user.username,
-            role:        normalizedRole,
-            displayName: result.user.displayName ?? result.user.username,
-            loginAt:     now,
-            expiresAt:   now + SESSION_MAX_MS,
-            lastActive:  now,
-          };
-          writeSession(session);
-          setUser({ username: session.username, role: session.role, displayName: session.displayName });
+      const result = await response.json().catch(() => ({} as any));
 
-          if (normalizedRole === "doctor") {
-            try {
-              const { updateDoctorOnlineStatus } = await import("./staff-server");
-              await updateDoctorOnlineStatus({
-                data: { username: result.user.username, isOnline: true, callerRole: normalizedRole || undefined },
-              });
-            } catch (err) {
-              console.error("Failed to update doctor online status on login:", err);
-            }
-          }
-
-          return { success: true };
-        } else if (result.message || result.error) {
-          return { success: false, error: result.message || result.error };
+      if (response.ok && result.success && result.token && result.user) {
+        localStorage.setItem('token', result.token);
+        const now = Date.now();
+        const normalizedRole = normalizeStaffRole(result.user.role as string);
+        if (!normalizedRole) {
+          return { success: false, error: "Unknown staff role returned by server." };
         }
-      }
-    } catch (apiErr) {
-      console.warn("[Staff Auth] Express API login unavailable, attempting Supabase fallback...", apiErr);
-    }
-
-    // 2. Secondary approach: Supabase Database fallback
-    try {
-      const { data: accounts, error: sbError } = await supabase
-        .from("staff_accounts")
-        .select("id, username, role, display_name, is_active, password_hash")
-        .ilike("username", cleanUsername)
-        .eq("is_active", true);
-
-      if (!sbError && accounts && accounts.length > 0) {
-        const account = accounts[0];
-        const isMatch = account.password_hash === cleanPassword || account.password_hash === cleanPassword.toLowerCase();
-
-        if (isMatch) {
-          const now = Date.now();
-          const normalizedRole = normalizeStaffRole(account.role as string);
-          if (!normalizedRole) {
-            return { success: false, error: "Invalid staff role in database account." };
-          }
-          const session: SessionData = {
-            username:    account.username,
-            role:        normalizedRole,
-            displayName: account.display_name ?? account.username,
-            loginAt:     now,
-            expiresAt:   now + SESSION_MAX_MS,
-            lastActive:  now,
-          };
-          writeSession(session);
-          setUser({ username: session.username, role: session.role, displayName: session.displayName });
-          return { success: true };
-        }
-      }
-    } catch (sbErr) {
-      console.warn("[Staff Auth] Supabase fallback error:", sbErr);
-    }
-
-    // 3. Fallback: Emergency default credentials for development/recovery
-    const DEFAULT_ACCOUNTS: Record<string, { role: string; displayName: string }> = {
-      admin: { role: "admin", displayName: "System Administrator" },
-      reception: { role: "reception", displayName: "Front Desk Receptionist" },
-      receptionist: { role: "reception", displayName: "Front Desk Receptionist" },
-      doctor: { role: "doctor", displayName: "Dr. Medical Specialist" },
-      pharmacy: { role: "pharmacy", displayName: "Pharmacy Department" },
-      laboratory: { role: "laboratory", displayName: "Laboratory Department" },
-      cashier: { role: "cashier", displayName: "Billing Officer" },
-    };
-
-    if (cleanPassword === "admin123" && DEFAULT_ACCOUNTS[cleanUsername]) {
-      const acc = DEFAULT_ACCOUNTS[cleanUsername];
-      const now = Date.now();
-      const normalizedRole = normalizeStaffRole(acc.role);
-      if (normalizedRole) {
         const session: SessionData = {
-          username:    cleanUsername,
+          username:    result.user.username,
           role:        normalizedRole,
-          displayName: acc.displayName,
+          displayName: result.user.displayName ?? result.user.username,
           loginAt:     now,
           expiresAt:   now + SESSION_MAX_MS,
           lastActive:  now,
         };
         writeSession(session);
         setUser({ username: session.username, role: session.role, displayName: session.displayName });
+
+        if (normalizedRole === "doctor") {
+          try {
+            const { updateDoctorOnlineStatus } = await import("./staff-server");
+            await updateDoctorOnlineStatus({
+              data: { username: result.user.username, isOnline: true, callerRole: normalizedRole || undefined },
+            });
+          } catch (err) {
+            console.error("Failed to update doctor online status on login:", err);
+          }
+        }
+
         return { success: true };
       }
-    }
 
-    return { success: false, error: "Invalid username or password. Please try again." };
+      if (response.status === 401) {
+        return { success: false, error: result.message || result.error || "Invalid username or password. Please try again." };
+      }
+
+      return {
+        success: false,
+        error: result.message || result.error || "Unable to sign in. Please try again.",
+      };
+    } catch (apiErr) {
+      console.warn("[Staff Auth] Express API login unavailable:", apiErr);
+      return { success: false, error: "Cannot reach the login server. Please try again." };
+    }
   };
 
   // ── Logout ────────────────────────────────────────────────────────────────

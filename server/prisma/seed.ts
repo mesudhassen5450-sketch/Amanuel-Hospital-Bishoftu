@@ -24,7 +24,6 @@ async function seedDatabase() {
     await prisma.staffAccount.upsert({
       where: { username: account.username },
       update: {
-        passwordHash: hashedPassword,
         role: account.role,
         displayName: account.displayName,
         isActive: true,
