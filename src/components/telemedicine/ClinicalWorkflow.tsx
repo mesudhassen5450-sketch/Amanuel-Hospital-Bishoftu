@@ -137,7 +137,7 @@ export function ClinicalWorkflow({ appointment, isDoctor = false }: ClinicalWork
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div className="col-span-1 sm:col-span-2">
                 <Label className="text-xs text-muted-foreground">Name</Label>
-                <p className="font-medium text-foreground text-sm sm:text-base">{appointment.patient_name || "Guest Patient"}</p>
+                <p className="font-medium text-foreground text-sm sm:text-base">{appointment.patient_name || "—"}</p>
                 {appointment.phone && (
                   <p className="text-xs text-muted-foreground">{appointment.phone}</p>
                 )}
@@ -163,7 +163,7 @@ export function ClinicalWorkflow({ appointment, isDoctor = false }: ClinicalWork
               <div>
                 <Label className="text-xs text-muted-foreground">Doctor</Label>
                 <p className="font-medium text-foreground text-xs sm:text-sm">
-                  {appointment.doctor_name || "Dr. Amanuel Tesfaye"}
+                  {appointment.doctor_name || "—"}
                 </p>
               </div>
               <div>

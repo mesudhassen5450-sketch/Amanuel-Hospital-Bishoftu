@@ -74,7 +74,7 @@ function VideoConsultationPage() {
         const age = calcAge(patient?.date_of_birth);
 
         // Flexible field mapping for patient data
-        const patientName = data.patient_name || data.full_name || patient?.full_name || patient?.name || "Guest Patient";
+        const patientName = data.patient_name || data.full_name || patient?.full_name || patient?.name || "";
         const phoneNumber = data.phone_number || data.phone || patient?.phone_number || patient?.phone || "";
         const reason = data.reason_for_visit || data.symptoms || data.reason || data.complaint || data.chief_complaint || "Online Video Consultation";
         const patientAge = age || data.age || null;
@@ -100,7 +100,7 @@ function VideoConsultationPage() {
             weight:        patient?.weight        ?? data.weight        ?? "N/A",
           },
           // Extra
-          doctor_name:     data.doctor_name ?? "Dr. Amanuel Tesfaye",
+          doctor_name:     data.doctor_name ?? "",
         });
         // Doctor bypasses payment; patients need paid status
         setIsPaid(
@@ -109,40 +109,15 @@ function VideoConsultationPage() {
           data.payment_status === "PAID"
         );
       } else {
-        // Appointment not found — use safe fallbacks
-        setAppointment({
-          id:               appointmentId,
-          patient_name:     "Guest Patient",
-          phone:            "",
-          patient_age:      null,
-          patient_gender:   null,
-          primary_complaints: "Online Video Consultation",
-          payment_status:   isDoctor ? "paid" : "unpaid",
-          status:           "SCHEDULED",
-          consultation_fee: 100,
-          vitals:           { temperature: "N/A", blood_pressure: "N/A", heart_rate: "N/A", weight: "N/A" },
-          doctor_name:      "Dr. Amanuel Tesfaye",
-        });
-        setIsPaid(isDoctor);
+        // Appointment not found — no mock patient/doctor names
+        setAppointment(null);
+        setIsPaid(false);
       }
     } catch (err: any) {
       console.error("Failed to load appointment:", err);
       toast.error("Could not load appointment details.");
-      // Safe fallback so the page still renders
-      setAppointment({
-        id:               appointmentId,
-        patient_name:     "Guest Patient",
-        phone:            "",
-        patient_age:      null,
-        patient_gender:   null,
-        primary_complaints: "Online Video Consultation",
-        payment_status:   isDoctor ? "paid" : "unpaid",
-        status:           "SCHEDULED",
-        consultation_fee: 100,
-        vitals:           { temperature: "N/A", blood_pressure: "N/A", heart_rate: "N/A", weight: "N/A" },
-        doctor_name:      "Dr. Amanuel Tesfaye",
-      });
-      setIsPaid(isDoctor);
+      setAppointment(null);
+      setIsPaid(false);
     } finally {
       setLoadingAppt(false);
     }
@@ -332,7 +307,7 @@ function VideoConsultationPage() {
                   {/* Doctor Info Badge */}
                   <span className="px-3 py-1.5 rounded-full bg-slate-900/60 text-white text-xs font-medium backdrop-blur-md border border-slate-700/50 flex items-center gap-2">
                     <Clock className="h-3 w-3" />
-                    Doctor: {appointment.doctor_name || 'Dr. Amanuel'}
+                    Doctor: {appointment?.doctor_name || "—"}
                   </span>
                 </div>
                 {/* Right Group */}
@@ -398,7 +373,7 @@ function VideoConsultationPage() {
             </div>
             <div>
               <h2 className="font-bold text-lg">
-                {appointment?.doctor_name || 'Dr. Amanuel'}
+                {appointment?.doctor_name || "—"}
               </h2>
               <p className="text-blue-100 text-sm">General Practitioner</p>
               <div className="flex items-center gap-2 mt-1">
@@ -474,7 +449,7 @@ function VideoConsultationPage() {
               <div className="space-y-3">
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Patient Name</p>
-                  <p className="text-sm font-medium text-slate-800">{appointment?.patient_name || 'Guest Patient'}</p>
+                  <p className="text-sm font-medium text-slate-800">{appointment?.patient_name || "—"}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 mb-1">Phone Number</p>

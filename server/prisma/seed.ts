@@ -21,14 +21,19 @@ async function seedDatabase() {
   console.log('👥 Seeding staff_accounts table...');
 
   for (const account of staffAccounts) {
-    await prisma.staffAccount.upsert({
+    // Create missing bootstrap accounts only.
+    // Never overwrite passwords, never reactivate deleted/disabled accounts.
+    const existing = await prisma.staffAccount.findUnique({
       where: { username: account.username },
-      update: {
-        role: account.role,
-        displayName: account.displayName,
-        isActive: true,
-      },
-      create: {
+    });
+
+    if (existing) {
+      console.log(`  ⏭️  Skipping existing staff account: ${account.username}`);
+      continue;
+    }
+
+    await prisma.staffAccount.create({
+      data: {
         username: account.username,
         passwordHash: hashedPassword,
         role: account.role,
@@ -38,7 +43,7 @@ async function seedDatabase() {
       },
     });
 
-    console.log(`  ✅ Seeded/Updated staff account: ${account.username} (${account.role})`);
+    console.log(`  ✅ Created staff account: ${account.username} (${account.role})`);
   }
 
   console.log('\n✅ Database seeding completed successfully!');

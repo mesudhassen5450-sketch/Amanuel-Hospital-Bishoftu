@@ -96,8 +96,8 @@ function mapStaffRow(account: any, profile?: { specialty?: string; experience?: 
     lastSeen: account.last_seen ?? account.lastSeen ?? null,
     createdAt: account.created_at ?? account.createdAt ?? new Date().toISOString(),
     updatedAt: account.updated_at ?? account.updatedAt ?? new Date().toISOString(),
-    specialty: profile?.specialty || meta?.specialty || (doctor ? "General Practice" : undefined),
-    experience: profile?.experience || meta?.experience || (doctor ? "5+ years" : undefined),
+    specialty: profile?.specialty || meta?.specialty || undefined,
+    experience: profile?.experience || meta?.experience || undefined,
     bio: profile?.bio || meta?.bio,
   };
 }
