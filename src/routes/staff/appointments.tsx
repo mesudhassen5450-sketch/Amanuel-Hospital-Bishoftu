@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
 import { useStaffAuth } from "@/lib/staff-auth";
-import { getReceptionAppointments, updateVisitStatus, linkAppointmentToPatient, getPatients, sendSmsReminder } from "@/lib/staff-server";
+import { getReceptionAppointments, updateVisitStatus, linkAppointmentToPatient, getPatients, sendSmsReminder, deletePaymentRecord } from "@/lib/staff-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Search, RefreshCcw, Loader2, CalendarDays, Link2, Send } from "lucide-react";
+import { Search, RefreshCcw, Loader2, CalendarDays, Link2, Send, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/staff/appointments")({
@@ -56,6 +56,8 @@ function AppointmentsPage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [linkModal, setLinkModal] = useState<{ apptId: string; search: string } | null>(null);
   const [sendingSmsId, setSendingSmsId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = async (date?: string) => {
     setLoading(true);
@@ -95,6 +97,21 @@ function AppointmentsPage() {
       await load(dateFilter);
     } finally {
       setSendingSmsId(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deletePaymentRecord({ data: { id: deleteTarget.id, callerRole: user?.role ?? undefined } });
+      setAppts((prev) => prev.filter((row) => row.id !== deleteTarget.id));
+      toast.success("Appointment deleted from the database");
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete appointment");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -262,6 +279,12 @@ function AppointmentsPage() {
                               className="h-7 text-xs rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5 px-2.5"
                               onClick={() => handleStatus(a.id, "cancelled")}>Cancel</Button>
                           )}
+                          <Button size="sm" variant="outline"
+                            className="h-7 w-7 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                            title="Delete appointment"
+                            onClick={() => setDeleteTarget(a)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </td>
                     </tr>
@@ -302,6 +325,22 @@ function AppointmentsPage() {
                 <Button variant="outline" className="w-full rounded-xl" onClick={() => setLinkModal(null)}>Cancel</Button>
               </CardContent>
             </Card>
+          </div>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">Delete appointment</p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes the appointment for <span className="font-semibold text-foreground">{deleteTarget.fullName}</span> from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </StaffLayout>

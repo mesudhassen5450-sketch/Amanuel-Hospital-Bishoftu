@@ -2,13 +2,14 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
-import { getDoctorQueue } from "@/lib/staff-server";
+import { useStaffAuth } from "@/lib/staff-auth";
+import { getDoctorQueue, deletePaymentRecord } from "@/lib/staff-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Search, RefreshCcw, Loader2, Clock, Stethoscope } from "lucide-react";
+import { Search, RefreshCcw, Loader2, Clock, Stethoscope, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/staff/doctor/queue")({
@@ -26,11 +27,14 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 function DoctorQueuePage() {
+  const { user } = useStaffAuth();
   const [appts, setAppts]   = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery]   = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = async (date?: string) => {
     setLoading(true);
@@ -42,6 +46,21 @@ function DoctorQueuePage() {
   };
 
   useEffect(() => { load(dateFilter); }, [dateFilter, refreshKey]);
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deletePaymentRecord({ data: { id: deleteTarget.id, callerRole: user?.role ?? undefined } });
+      setAppts((prev) => prev.filter((row) => row.id !== deleteTarget.id));
+      toast.success("Patient queue record deleted from the database");
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete record");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const filtered = appts.filter(a => {
     const q = query.toLowerCase();
@@ -133,21 +152,45 @@ function DoctorQueuePage() {
                       </p>
                     </div>
                   </div>
-                  {a.patientMRN ? (
-                    <Link to="/staff/doctor/patient/$mrn" params={{ mrn: a.patientMRN }}
-                      search={{ appointmentId: a.id }}>
-                      <Button size="sm" className="gap-1.5 rounded-xl shadow-sm">
-                        <Stethoscope className="h-4 w-4" /> Consult
+                  <div className="flex items-center gap-2">
+                    {a.patientMRN ? (
+                      <Link to="/staff/doctor/patient/$mrn" params={{ mrn: a.patientMRN }}
+                        search={{ appointmentId: a.id }}>
+                        <Button size="sm" className="gap-1.5 rounded-xl shadow-sm">
+                          <Stethoscope className="h-4 w-4" /> Consult
+                        </Button>
+                      </Link>
+                    ) : (
+                      <Button size="sm" variant="outline" disabled className="rounded-xl opacity-50 text-xs">
+                        No MRN — link patient first
                       </Button>
-                    </Link>
-                  ) : (
-                    <Button size="sm" variant="outline" disabled className="rounded-xl opacity-50 text-xs">
-                      No MRN — link patient first
+                    )}
+                    <Button size="sm" variant="outline"
+                      className="h-8 w-8 p-0 rounded-xl border-destructive/30 text-destructive hover:bg-destructive/5"
+                      title="Delete record"
+                      onClick={() => setDeleteTarget(a)}>
+                      <Trash2 className="h-4 w-4" />
                     </Button>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
+          </div>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">Delete queue record</p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes the appointment for <span className="font-semibold text-foreground">{deleteTarget.fullName}</span> from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </StaffLayout>

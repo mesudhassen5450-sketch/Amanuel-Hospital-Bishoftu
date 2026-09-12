@@ -3,13 +3,13 @@ import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
 import { useStaffAuth } from "@/lib/staff-auth";
-import { getPrescriptionsForPharmacy, dispensePrescription } from "@/lib/staff-server";
+import { getPrescriptionsForPharmacy, dispensePrescription, deletePrescription } from "@/lib/staff-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Pill, Search, RefreshCcw, Loader2, CheckCircle2, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Pill, Search, RefreshCcw, Loader2, CheckCircle2, X, ChevronDown, ChevronUp, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/staff/pharmacy/prescriptions")({
@@ -34,6 +34,8 @@ function PharmacyPrescriptionsPage() {
   const [expanded, setExpanded]           = useState<Set<number>>(new Set());
   const [dispensing, setDispensing]       = useState<number | null>(null);
   const [confirmId, setConfirmId]         = useState<number | null>(null);
+  const [deleteTarget, setDeleteTarget]   = useState<any | null>(null);
+  const [deleting, setDeleting]           = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -68,6 +70,21 @@ function PharmacyPrescriptionsPage() {
       toast.error(e.message ?? "Failed to dispense prescription.");
     } finally {
       setDispensing(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deletePrescription({ data: { id: deleteTarget.id, callerRole: user?.role ?? undefined } });
+      setPrescriptions((prev) => prev.filter((row) => row.id !== deleteTarget.id));
+      toast.success("Prescription deleted from the database");
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to delete prescription");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -152,6 +169,12 @@ function PharmacyPrescriptionsPage() {
                           }
                         </Button>
                       )}
+                      <Button size="sm" variant="outline"
+                        className="h-8 w-8 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                        title="Delete prescription"
+                        onClick={() => setDeleteTarget(p)}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
                     </div>
                   </div>
                 </CardHeader>
@@ -206,6 +229,22 @@ function PharmacyPrescriptionsPage() {
                 <Button className="flex-1 rounded-xl bg-green-600 hover:bg-green-700 text-white gap-2"
                   onClick={() => handleDispense(confirmId!)}>
                   <CheckCircle2 className="h-4 w-4" /> Confirm
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">Delete prescription</p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes the prescription for <span className="font-semibold text-foreground">{deleteTarget.patients?.full_name ?? "this patient"}</span> from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
                 </Button>
               </div>
             </div>

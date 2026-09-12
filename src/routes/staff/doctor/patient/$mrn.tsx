@@ -12,6 +12,9 @@ import {
   getMedicines,
   savePrescription,
   getPatientPrescriptions,
+  deleteConsultation,
+  deleteLabResult,
+  deletePrescription,
 } from "@/lib/staff-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -107,6 +110,8 @@ function DoctorPatientPage() {
 
   const [medicines, setMedicines]           = useState<any[]>([]);
   const [prescriptions, setPrescriptions]   = useState<any[]>([]);
+  const [deleteTarget, setDeleteTarget]     = useState<{ type: "consultation" | "lab" | "prescription"; row: any } | null>(null);
+  const [deleting, setDeleting]             = useState(false);
   const [rxItems, setRxItems]               = useState<RxItem[]>([emptyItem()]);
   const [rxNotes, setRxNotes]               = useState("");
   const [rxSaved, setRxSaved]               = useState(false);
@@ -246,6 +251,31 @@ function DoctorPatientPage() {
       toast.error(err.message ?? "Failed to save prescription.");
     } finally {
       setRxSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.type === "consultation") {
+        await deleteConsultation({ data: { id: deleteTarget.row.id, callerRole: user?.role ?? undefined } });
+        setConsultations((prev) => prev.filter((row) => row.id !== deleteTarget.row.id));
+        toast.success("Consultation deleted from the database");
+      } else if (deleteTarget.type === "lab") {
+        await deleteLabResult({ data: { id: deleteTarget.row.id, callerRole: user?.role ?? undefined } });
+        setLabResults((prev) => prev.filter((row) => row.id !== deleteTarget.row.id));
+        toast.success("Lab result deleted from the database");
+      } else {
+        await deletePrescription({ data: { id: deleteTarget.row.id, callerRole: user?.role ?? undefined } });
+        setPrescriptions((prev) => prev.filter((row) => row.id !== deleteTarget.row.id));
+        toast.success("Prescription deleted from the database");
+      }
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete record");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -429,7 +459,15 @@ function DoctorPatientPage() {
                       <Stethoscope className="h-4 w-4 text-primary" />
                       {new Date(c.created_at).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                     </CardTitle>
-                    <span className="text-xs text-muted-foreground capitalize">Dr. {c.doctor_username}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground capitalize">Dr. {c.doctor_username}</span>
+                      <Button size="sm" variant="outline"
+                        className="h-7 w-7 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                        title="Delete consultation"
+                        onClick={() => setDeleteTarget({ type: "consultation", row: c })}>
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent className="pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
@@ -651,9 +689,17 @@ function DoctorPatientPage() {
                               {new Date(r.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                             </p>
                           </div>
-                          <Badge className="bg-green-600/10 text-green-700 border-green-600/20 border rounded-full text-xs font-semibold px-2.5">
-                            Completed
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            <Badge className="bg-green-600/10 text-green-700 border-green-600/20 border rounded-full text-xs font-semibold px-2.5">
+                              Completed
+                            </Badge>
+                            <Button size="sm" variant="outline"
+                              className="h-7 w-7 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                              title="Delete lab result"
+                              onClick={() => setDeleteTarget({ type: "lab", row: r })}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
                         </div>
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-secondary/20 rounded-xl p-3">
                           <div>
@@ -893,6 +939,12 @@ function DoctorPatientPage() {
                             )}>
                               {presc.prescription_status}
                             </Badge>
+                            <Button size="sm" variant="outline"
+                              className="h-7 w-7 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                              title="Delete prescription"
+                              onClick={() => setDeleteTarget({ type: "prescription", row: presc })}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
                           </div>
                         </div>
                       </CardHeader>
@@ -932,6 +984,22 @@ function DoctorPatientPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">Delete record</p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes this {deleteTarget.type === "lab" ? "lab result" : deleteTarget.type} from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
+                </Button>
+              </div>
             </div>
           </div>
         )}

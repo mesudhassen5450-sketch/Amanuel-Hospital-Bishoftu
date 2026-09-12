@@ -1,14 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
-import { getPatients } from "@/lib/staff-server";
+import { useStaffAuth } from "@/lib/staff-auth";
+import { getPatients, deletePatientRecord } from "@/lib/staff-server";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { Link } from "@tanstack/react-router";
-import { Search, UserPlus, Loader2, Users, Eye } from "lucide-react";
+import { Search, UserPlus, Loader2, Users, Eye, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/staff/patients/")({
   head: () => ({ meta: [{ title: "Patients — Dr. Amanuel Hospital" }] }),
@@ -16,9 +17,12 @@ export const Route = createFileRoute("/staff/patients/")({
 });
 
 function PatientsPage() {
+  const { user } = useStaffAuth();
   const [patients, setPatients] = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
   const [query, setQuery]       = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     getPatients().then(data => { setPatients(data as any[]); setLoading(false); }).catch(() => setLoading(false));
@@ -30,8 +34,23 @@ function PatientsPage() {
     p.phone.includes(query)
   );
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deletePatientRecord({ data: { id: deleteTarget.id, callerRole: user?.role ?? undefined } });
+      setPatients((prev) => prev.filter((row) => row.id !== deleteTarget.id));
+      toast.success("Patient record deleted from the database");
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete patient");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
-    <StaffGuard allowedRoles={["reception", "staff"]}>
+    <StaffGuard allowedRoles={["reception", "staff", "cashier", "doctor", "laboratory", "pharmacy", "admin"]}>
       <StaffLayout>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
@@ -100,16 +119,43 @@ function PatientsPage() {
                         {new Date(p.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <Link to="/staff/patients/$mrn" params={{ mrn: p.mrn }}>
-                          <Button size="sm" variant="outline" className="gap-1.5 rounded-lg h-8 text-xs border-primary/30 text-primary hover:bg-primary/5">
-                            <Eye className="h-3.5 w-3.5" /> View
+                        <div className="flex items-center justify-end gap-1.5">
+                          <Link to="/staff/patients/$mrn" params={{ mrn: p.mrn }}>
+                            <Button size="sm" variant="outline" className="gap-1.5 rounded-lg h-8 text-xs border-primary/30 text-primary hover:bg-primary/5">
+                              <Eye className="h-3.5 w-3.5" /> View
+                            </Button>
+                          </Link>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                            title="Delete patient"
+                            onClick={() => setDeleteTarget(p)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
-                        </Link>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">Delete patient</p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes <span className="font-semibold text-foreground">{deleteTarget.full_name}</span> ({deleteTarget.mrn}) and related appointments, lab, and billing records from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
+                </Button>
+              </div>
             </div>
           </div>
         )}

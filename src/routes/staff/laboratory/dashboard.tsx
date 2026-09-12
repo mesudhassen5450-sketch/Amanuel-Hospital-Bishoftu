@@ -3,13 +3,14 @@ import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
 import { useStaffAuth } from "@/lib/staff-auth";
-import { getLabDashboardStats, getLabRequests } from "@/lib/staff-server";
+import { getLabDashboardStats, getLabRequests, deleteLabRequest } from "@/lib/staff-server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { FlaskConical, TestTube, CheckCircle2, Clock, Loader2, RefreshCcw, Search } from "lucide-react";
+import { FlaskConical, TestTube, CheckCircle2, Clock, Loader2, RefreshCcw, Search, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/staff/laboratory/dashboard")({
   head: () => ({ meta: [{ title: "Lab Dashboard — Dr. Amanuel Hospital" }] }),
@@ -30,6 +31,8 @@ function LabDashboardPage() {
   const [recent, setRecent] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery]   = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<any | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -54,6 +57,21 @@ function LabDashboardPage() {
       r.testName?.toLowerCase().includes(q)
     );
   });
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await deleteLabRequest({ data: { id: deleteTarget.id, callerRole: user?.role ?? undefined } });
+      setRecent((prev) => prev.filter((row) => row.id !== deleteTarget.id));
+      toast.success("Lab request deleted from the database");
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete lab request");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const CARDS = stats ? [
     { label: "Today's Requests", value: stats.todayRequests, icon: FlaskConical, color: "text-primary",    bg: "bg-primary/10" },
@@ -143,6 +161,7 @@ function LabDashboardPage() {
                         <th className="px-4 py-3">Doctor</th>
                         <th className="px-4 py-3">Date</th>
                         <th className="px-4 py-3">Status</th>
+                        <th className="px-4 py-3 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
@@ -160,10 +179,18 @@ function LabDashboardPage() {
                               {r.status}
                             </Badge>
                           </td>
+                          <td className="px-4 py-3 text-right">
+                            <Button size="sm" variant="outline"
+                              className="h-7 w-7 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                              title="Delete lab request"
+                              onClick={() => setDeleteTarget(r)}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                       {filtered.length === 0 && (
-                        <tr><td colSpan={5} className="text-center py-8 text-slate-500 dark:text-slate-400">No requests found</td></tr>
+                        <tr><td colSpan={6} className="text-center py-8 text-slate-500 dark:text-slate-400">No requests found</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -171,6 +198,23 @@ function LabDashboardPage() {
               </div>
             </div>
           </>
+        )}
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">Delete lab request</p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes <span className="font-semibold text-foreground">{deleteTarget.testName}</span> for{" "}
+                <span className="font-semibold text-foreground">{deleteTarget.patient?.full_name ?? "this patient"}</span> from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
+                </Button>
+              </div>
+            </div>
+          </div>
         )}
       </StaffLayout>
     </StaffGuard>

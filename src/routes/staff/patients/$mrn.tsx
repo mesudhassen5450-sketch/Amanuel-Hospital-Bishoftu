@@ -2,15 +2,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
-import { getPatientByMRN, getPatientConsultations } from "@/lib/staff-server";
+import { getPatientByMRN, getPatientConsultations, deletePatientRecord, deleteConsultation } from "@/lib/staff-server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import {
   User, Phone, Calendar, MapPin, Heart, AlertTriangle,
-  Activity, ChevronLeft, Loader2, ClipboardList, Pencil, Stethoscope
+  Activity, ChevronLeft, Loader2, ClipboardList, Pencil, Stethoscope, Trash2
 } from "lucide-react";
+import { useStaffAuth } from "@/lib/staff-auth";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/staff/patients/$mrn")({
   head: () => ({ meta: [{ title: "Patient Profile — Dr. Amanuel Hospital" }] }),
@@ -33,10 +35,14 @@ function InfoRow({ icon: Icon, label, value }: { icon: any; label: string; value
 
 function PatientProfilePage() {
   const { mrn } = Route.useParams();
+  const { user } = useStaffAuth();
+  const navigate = useNavigate();
   const [patient, setPatient]             = useState<any>(null);
   const [consultations, setConsultations] = useState<any[]>([]);
   const [loading, setLoading]             = useState(true);
   const [error, setError]                 = useState("");
+  const [deleteTarget, setDeleteTarget]   = useState<{ type: "patient" | "consultation"; row: any } | null>(null);
+  const [deleting, setDeleting]           = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -56,6 +62,28 @@ function PatientProfilePage() {
       }
     })();
   }, [mrn]);
+
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      if (deleteTarget.type === "patient") {
+        await deletePatientRecord({ data: { id: deleteTarget.row.id, callerRole: user?.role ?? undefined } });
+        toast.success("Patient record deleted from the database");
+        setDeleteTarget(null);
+        navigate({ to: "/staff/patients" });
+        return;
+      }
+      await deleteConsultation({ data: { id: deleteTarget.row.id, callerRole: user?.role ?? undefined } });
+      setConsultations((prev) => prev.filter((row) => row.id !== deleteTarget.row.id));
+      toast.success("Consultation deleted from the database");
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete record");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   if (loading) return (
     <StaffGuard allowedRoles={["reception", "staff"]}><StaffLayout>
@@ -95,9 +123,16 @@ function PatientProfilePage() {
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" className="gap-2 rounded-xl" disabled>
-            <Pencil className="h-4 w-4" /> Edit
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" className="gap-2 rounded-xl" disabled>
+              <Pencil className="h-4 w-4" /> Edit
+            </Button>
+            <Button variant="outline" size="sm"
+              className="gap-2 rounded-xl border-destructive/30 text-destructive hover:bg-destructive/5"
+              onClick={() => setDeleteTarget({ type: "patient", row: patient })}>
+              <Trash2 className="h-4 w-4" /> Delete
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-5xl">
@@ -179,9 +214,17 @@ function PatientProfilePage() {
                           })}
                         </span>
                       </div>
-                      <span className="text-xs text-muted-foreground capitalize">
-                        Dr. {c.doctor_username}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-muted-foreground capitalize">
+                          Dr. {c.doctor_username}
+                        </span>
+                        <Button size="sm" variant="outline"
+                          className="h-7 w-7 p-0 rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5"
+                          title="Delete consultation"
+                          onClick={() => setDeleteTarget({ type: "consultation", row: c })}>
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
 
                     {/* Main fields */}
@@ -241,6 +284,24 @@ function PatientProfilePage() {
             )}
           </Card>
         </div>
+        {deleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+            <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm p-6 space-y-5">
+              <p className="font-bold text-foreground text-lg">
+                {deleteTarget.type === "patient" ? "Delete patient" : "Delete consultation"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                This permanently deletes this record from the database.
+              </p>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1 rounded-xl" onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+                <Button className="flex-1 rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-2" onClick={handleDelete} disabled={deleting}>
+                  {deleting ? <><Loader2 className="h-4 w-4 animate-spin" /> Deleting...</> : <><Trash2 className="h-4 w-4" /> Delete</>}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </StaffLayout>
     </StaffGuard>
   );
