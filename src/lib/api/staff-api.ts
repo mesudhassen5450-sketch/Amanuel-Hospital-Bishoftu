@@ -313,57 +313,56 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
 
 /**
  * PUT /api/staff/:id
- * Update staff account details
+ * Update staff account details.
+ * Login uses Render/Express — username changes MUST go through Express
+ * or Admin will show the new username while /api/auth/login still uses the old one.
  */
 export const updateStaffAccount = async (id: string | number, data: UpdateStaffData): Promise<StaffAccount> => {
   const cleanUsername = data.username.toLowerCase().trim();
   const role = canonicalRole(data.role);
   const targetStr = String(id).trim();
-  const numId = parseInt(targetStr, 10);
   let updated: any = null;
   let lastError = "";
 
-  if (!isNaN(numId)) {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc("update_staff_account", {
-      p_id: numId,
-      p_username: cleanUsername,
-      p_role: role,
-      p_display_name: data.displayName.trim(),
-      p_is_active: data.isActive,
+  // 1) Express first — same database path that login reads
+  try {
+    const response = await apiFetch(`/api/staff/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        username: cleanUsername,
+        role,
+        displayName: data.displayName.trim(),
+        isActive: data.isActive,
+        specialty: data.specialty,
+        experience: data.experience,
+        experienceYears: data.experienceYears,
+        bio: data.bio,
+      }),
     });
-    const parsed = parseRpcPayload(rpcResult);
-    if (!rpcError && parsed.success && parsed.data) {
-      updated = parsed.data;
-    } else {
-      lastError = parsed.error || rpcError?.message || "";
-    }
+    const result = await handleApiResponse<{ success: boolean; data: StaffAccount }>(response);
+    updated = result.data;
+  } catch (apiErr: any) {
+    lastError = apiErr?.message || "Failed to update login account on the server";
+    console.warn("[Staff API] Express updateStaff failed:", apiErr);
   }
 
+  // 2) Supabase fallback only if Express is unreachable
   if (!updated) {
-    const updatePayload: any = {
-      username: cleanUsername,
-      role,
-      display_name: data.displayName.trim(),
-      is_active: data.isActive,
-      updated_at: new Date().toISOString(),
-    };
-    let query = supabase.from("staff_accounts").update(updatePayload);
-    query = !isNaN(numId) ? query.eq("id", numId) : query.ilike("username", targetStr);
-    const { data: row, error } = await query.select().single();
-    if (row) updated = row;
-    else lastError = error?.message || lastError;
-  }
-
-  if (!updated) {
-    try {
-      const response = await apiFetch(`/api/staff/${id}`, {
-        method: "PUT",
-        body: JSON.stringify({ ...data, role }),
+    const numId = parseInt(targetStr, 10);
+    if (!isNaN(numId)) {
+      const { data: rpcResult, error: rpcError } = await supabase.rpc("update_staff_account", {
+        p_id: numId,
+        p_username: cleanUsername,
+        p_role: role,
+        p_display_name: data.displayName.trim(),
+        p_is_active: data.isActive,
       });
-      const result = await handleApiResponse<{ success: boolean; data: StaffAccount }>(response);
-      updated = result.data;
-    } catch (apiErr: any) {
-      lastError = apiErr?.message || lastError;
+      const parsed = parseRpcPayload(rpcResult);
+      if (!rpcError && parsed.success && parsed.data) {
+        updated = parsed.data;
+      } else {
+        lastError = parsed.error || rpcError?.message || lastError;
+      }
     }
   }
 

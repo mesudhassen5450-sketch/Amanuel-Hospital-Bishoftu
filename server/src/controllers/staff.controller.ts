@@ -230,8 +230,8 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
 
         const formattedRole = role.toLowerCase();
 
-        // Check if staff exists safely via BigInt or username
-        const existingStaff = await findStaffAccount(rawId, username);
+        // Look up by ID only — do not pass the NEW username or we may resolve the wrong row
+        const existingStaff = await findStaffAccount(rawId);
 
         if (!existingStaff) {
             return res.status(404).json({
@@ -239,6 +239,8 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
                 error: 'Staff account not found',
             });
         }
+
+        const previousUsername = existingStaff.username;
 
         // Check if new username conflicts with another account
         if (username.toLowerCase() !== existingStaff.username.toLowerCase()) {
@@ -274,20 +276,53 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
             },
         });
 
+        // Keep doctors.username in sync when staff username changes
+        if (previousUsername.toLowerCase() !== updatedStaff.username.toLowerCase()) {
+            try {
+                await prisma.doctor.updateMany({
+                    where: {
+                        username: {
+                            equals: previousUsername,
+                            mode: 'insensitive',
+                        },
+                    },
+                    data: { username: updatedStaff.username },
+                });
+            } catch (renameErr: any) {
+                console.warn('[Staff Controller] Doctor username rename notice:', renameErr.message);
+            }
+        }
+
         // Update or create Doctor profile if role is doctor
         if (formattedRole === 'doctor') {
             try {
+                const experienceYears =
+                    req.body.experienceYears != null
+                        ? Number(req.body.experienceYears)
+                        : req.body.experience_years != null
+                          ? Number(req.body.experience_years)
+                          : null;
                 await prisma.doctor.upsert({
                     where: { username: updatedStaff.username },
                     update: {
                         specialty: specialty || 'General Practice',
-                        experience: experience ? String(experience) : undefined,
+                        experience: experience
+                            ? String(experience)
+                            : experienceYears
+                              ? `${experienceYears}+ years`
+                              : undefined,
+                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
                         bio: bio || undefined,
                     },
                     create: {
                         username: updatedStaff.username,
                         specialty: specialty || 'General Practice',
-                        experience: experience ? String(experience) : '5+ years',
+                        experience: experience
+                            ? String(experience)
+                            : experienceYears
+                              ? `${experienceYears}+ years`
+                              : '5+ years',
+                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
                         bio: bio || `Specialist physician at Dr. Amanuel Hospital.`,
                         isAvailable: true,
                     },
@@ -347,7 +382,7 @@ export const resetStaffPassword = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        const existingStaff = await findStaffAccount(rawId, username);
+        const existingStaff = await findStaffAccount(rawId, username || undefined);
 
         if (!existingStaff) {
             return res.status(404).json({
