@@ -148,7 +148,7 @@ function PaymentsPage() {
                 <thead>
                   <tr className="bg-secondary/30 border-b border-border/60 text-muted-foreground font-semibold text-xs uppercase tracking-wider">
                     <th className="px-4 py-3">Patient</th>
-                    <th className="px-4 py-3">Date</th>
+                    <th className="px-4 py-3">Date &amp; Time</th>
                     <th className="px-4 py-3">Method</th>
                     <th className="px-4 py-3">Amount</th>
                     <th className="px-4 py-3">Payment Status</th>
@@ -163,7 +163,10 @@ function PaymentsPage() {
                         <p className="font-semibold text-foreground">{a.fullName}</p>
                         <p className="text-xs text-muted-foreground">{a.phone}</p>
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">{a.appointmentDate}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        <p className="font-medium text-foreground">{a.appointmentDate || "—"}</p>
+                        <p className="text-xs">{a.appointmentTime || "Time not set"}</p>
+                      </td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {METHOD_LABEL[a.paymentMethod] ?? a.paymentMethod}
                       </td>

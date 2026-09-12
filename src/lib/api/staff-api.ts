@@ -255,39 +255,25 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
   } catch (apiErr: any) {
     lastError = apiErr?.message || "Failed to create login account on the server";
     console.warn("[Staff API] Express createStaff failed:", apiErr);
+    const msg = String(lastError).toLowerCase();
+    if (
+      msg.includes("insufficient permissions") ||
+      msg.includes("access denied") ||
+      msg.includes("unauthorized") ||
+      msg.includes("forbidden")
+    ) {
+      throw new Error(
+        "Access denied while creating staff. Sign out, sign in again as admin, then retry."
+      );
+    }
   }
 
-  // 2) Supabase RPC fallback only if Express is unreachable — then force Express password sync
+  // Do not fall back to the missing Supabase RPC (404). Express is the source of truth for login.
   if (!created) {
-    const { data: rpcResult, error: rpcError } = await supabase.rpc("create_staff_account", {
-      p_username: cleanUsername,
-      p_password: data.password,
-      p_role: role,
-      p_display_name: displayName,
-      p_is_active: isActive,
-    });
-    const parsed = parseRpcPayload(rpcResult);
-    if (!rpcError && parsed.success && parsed.data) {
-      created = parsed.data;
-      // Align password with Express/bcrypt so /api/auth/login accepts it
-      try {
-        const id = created.id ?? created.username;
-        await resetStaffPassword(id, {
-          newPassword: data.password,
-          username: cleanUsername,
-        });
-      } catch (syncErr: any) {
-        console.warn("[Staff API] Password sync after RPC create failed:", syncErr);
-        lastError =
-          syncErr?.message ||
-          "Account was created but login password could not be synced. Use Admin → Reset Password.";
-      }
-    } else {
-      lastError = parsed.error || rpcError?.message || lastError;
-      if (lastError.toLowerCase().includes("already exists") || lastError.toLowerCase().includes("taken")) {
-        throw new Error(`Username "${data.username}" is already taken. Please choose a different username.`);
-      }
-    }
+    throw new Error(
+      lastError ||
+        "Staff account was not saved. Sign in as admin again, then create the account."
+    );
   }
 
   const verified = (await fetchStaffByUsername(cleanUsername)) || created;
@@ -410,14 +396,16 @@ export const resetStaffPassword = async (id: string | number, data: ResetPasswor
     console.warn("[Staff API] Express resetPassword failed:", apiErr);
   }
 
-  if (!isNaN(numId)) {
-    const { data: rpcResult, error } = await supabase.rpc("reset_staff_password", {
-      p_id: numId,
-      p_new_password: data.newPassword,
-    });
-    const parsed = parseRpcPayload(rpcResult);
-    if (!error && parsed.success) return;
-    lastError = parsed.error || error?.message || lastError;
+  const msg = String(lastError).toLowerCase();
+  if (
+    msg.includes("insufficient permissions") ||
+    msg.includes("access denied") ||
+    msg.includes("unauthorized") ||
+    msg.includes("forbidden")
+  ) {
+    throw new Error(
+      "Access denied while resetting password. Sign out, sign in again as admin, then retry."
+    );
   }
 
   throw new Error(

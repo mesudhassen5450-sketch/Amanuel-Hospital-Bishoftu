@@ -63,7 +63,12 @@ function NewPatientPage() {
         notes: form.notes || undefined,
         callerRole: user?.role ?? undefined,
       }});
-      toast.success(`Patient registered! MRN: ${(patient as any).mrn}`);
+      const linked = Number((patient as any).linkedAppointments || 0);
+      toast.success(
+        linked > 0
+          ? `Patient registered! MRN: ${(patient as any).mrn}. Linked ${linked} appointment(s).`
+          : `Patient registered! MRN: ${(patient as any).mrn}`
+      );
       navigate({ to: "/staff/patients/$mrn", params: { mrn: (patient as any).mrn } });
     } catch (err: any) {
       console.error(err);

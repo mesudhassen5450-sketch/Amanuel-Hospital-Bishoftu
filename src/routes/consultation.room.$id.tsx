@@ -157,12 +157,13 @@ function ConsultationRoomPage() {
       },
     });
 
-    // Handle successful connection
-    socketRef.current.on('connect', () => {
-      console.log('[Chat] Socket.IO connected successfully:', socketRef.current?.id);
-      // Join the consultation room after connection
-      socketRef.current?.emit('join-room', { roomId, userId, userRole });
-    });
+    // Handle successful connection / reconnect
+    const joinConsultationRoom = () => {
+      console.log('[Chat] Socket.IO connected:', socketRef.current?.id, 'joining', roomId);
+      socketRef.current?.emit('join-room', { roomId, room_id: roomId, userId, userRole });
+    };
+    socketRef.current.on('connect', joinConsultationRoom);
+    socketRef.current.on('reconnect', joinConsultationRoom);
 
     // Listen for incoming messages with duplicate prevention
     socketRef.current.on('receive-message', (newMessage: any) => {
@@ -204,6 +205,7 @@ function ConsultationRoomPage() {
         console.log('[Chat] Cleaning up Socket.IO connection');
         socketRef.current.emit('leave-room', { roomId, userId });
         socketRef.current.off('connect');
+        socketRef.current.off('reconnect');
         socketRef.current.off('receive-message');
         socketRef.current.off('connect_error');
         socketRef.current.off('disconnect');
@@ -231,7 +233,19 @@ function ConsultationRoomPage() {
 
         if (data) {
           console.log('[Chat] Loaded', data.length, 'historical messages');
-          setMessages(data);
+          setMessages((prev) => {
+            const byKey = new Map<string, ChatMessage>();
+            for (const m of data as ChatMessage[]) {
+              byKey.set(String(m.id), m);
+            }
+            for (const m of prev) {
+              const key = String(m.id);
+              if (!byKey.has(key)) byKey.set(key, m);
+            }
+            return Array.from(byKey.values()).sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
+          });
         }
       } catch (err) {
         console.error('[Chat] Error:', err);
@@ -274,9 +288,13 @@ function ConsultationRoomPage() {
         console.log('[Chat] Supabase Realtime subscription status:', status);
       });
 
+    // Polling fallback so messages still sync if sockets/realtime drop
+    const pollId = window.setInterval(fetchMessages, 4000);
+
     // Cleanup subscription
     return () => {
       console.log('[Chat] Cleaning up Supabase Realtime subscription');
+      window.clearInterval(pollId);
       supabase.removeChannel(channel);
     };
   }, [id]);
@@ -372,6 +390,8 @@ function ConsultationRoomPage() {
     socketRef.current.emit('send-message', {
       ...messagePayload,
       roomId,
+      room_id: roomId,
+      client_msg_id: messagePayload.id,
     });
 
     // 3. Persist to Supabase in the background (non-blocking)

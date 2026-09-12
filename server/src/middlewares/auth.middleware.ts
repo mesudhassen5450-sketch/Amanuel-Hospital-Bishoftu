@@ -1,8 +1,24 @@
 import { Request, Response, NextFunction } from 'express';
 import { verifyToken, TokenPayload } from '../utils/auth.js';
+import { prisma } from '../config/db.js';
 
 export interface AuthRequest extends Request {
     user?: TokenPayload;
+}
+
+function normalizeRole(role?: string | null): string {
+    if (!role) return '';
+    return role.trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function isAdminRole(role?: string | null): boolean {
+    const normalized = normalizeRole(role);
+    return (
+        normalized === 'admin' ||
+        normalized === 'administrator' ||
+        normalized === 'system_admin' ||
+        normalized === 'super_admin'
+    );
 }
 
 export const authenticateToken = (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -23,7 +39,7 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
 };
 
 export const authorizeRoles = (...roles: string[]) => {
-    return (req: AuthRequest, res: Response, next: NextFunction) => {
+    return async (req: AuthRequest, res: Response, next: NextFunction) => {
         if (!req.user) {
             return res.status(401).json({
                 success: false,
@@ -31,21 +47,38 @@ export const authorizeRoles = (...roles: string[]) => {
             });
         }
 
-        // Normalize roles to uppercase for case-insensitive comparison
-        const userRole = req.user.role ? req.user.role.toUpperCase() : '';
-        const normalizedAllowedRoles = roles.map(r => r.toUpperCase());
+        const jwtRole = req.user.role;
+        const allowed = roles.map((r) => normalizeRole(r));
+        const jwtNormalized = normalizeRole(jwtRole);
 
-        // Allow access if user role matches any of the allowed roles
-        // or if user is an ADMIN/ADMINISTRATOR (admins have full access)
-        if (userRole === 'ADMIN' || 
-            userRole === 'ADMINISTRATOR' || 
-            normalizedAllowedRoles.includes(userRole)) {
+        if (isAdminRole(jwtRole) || allowed.includes(jwtNormalized)) {
             return next();
+        }
+
+        // Fallback: re-check live DB role (handles stale tokens / mixed-case legacy roles)
+        try {
+            const username = req.user.username?.toLowerCase?.() || req.user.username;
+            if (username) {
+                const staff = await prisma.staffAccount.findFirst({
+                    where: { username },
+                    select: { role: true, isActive: true },
+                });
+
+                if (staff && staff.isActive !== false) {
+                    const dbNormalized = normalizeRole(staff.role);
+                    if (isAdminRole(staff.role) || allowed.includes(dbNormalized)) {
+                        req.user.role = staff.role;
+                        return next();
+                    }
+                }
+            }
+        } catch (err: any) {
+            console.error('[Auth] Role DB lookup failed:', err?.message || err);
         }
 
         return res.status(403).json({
             success: false,
-            message: 'Access denied: Insufficient permissions for this department.'
+            message: 'Access denied: Insufficient permissions for this department. Sign out and sign in again as admin.'
         });
     };
 };

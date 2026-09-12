@@ -135,20 +135,48 @@ export const registerPatient = createServerFn({ method: "POST" })
     callerRole?: string;
   }) => d)
   .handler(async ({ data }) => {
-    checkRole("registerPatient", data.callerRole);
+    const callerRole = data.callerRole ?? (data as any).callerRole;
+    checkRole("registerPatient", callerRole);
     const sb = getSupabase();
     // Generate MRN first
     const { data: mrn, error: mrnErr } = await sb.rpc("generate_mrn");
     if (mrnErr) throw new Error(mrnErr.message);
 
+    // Never insert client-only auth fields into the patients table
+    const patientFields = { ...(data as Record<string, unknown>) };
+    delete patientFields.callerRole;
+    delete (patientFields as any).caller_role;
     const now = new Date().toISOString();
     const { data: patient, error } = await sb
       .from("patients")
-      .insert({ ...data, mrn, created_at: now, updated_at: now })
+      .insert({ ...patientFields, mrn, created_at: now, updated_at: now })
       .select()
       .single();
     if (error) throw new Error(error.message);
-    return patient;
+
+    // Auto-link unmatched appointments that share this phone number
+    const phone = String(patientFields.phone || "").trim();
+    let linkedAppointments = 0;
+    if (phone && patient?.id) {
+      const digits = phone.replace(/\D/g, "");
+      const { data: unmatched } = await sb
+        .from("appointments")
+        .select("id, phone, phone_number")
+        .is("patient_id", null);
+      const matches = (unmatched ?? []).filter((a: any) => {
+        const apptPhone = String(a.phone || a.phone_number || "").replace(/\D/g, "");
+        return apptPhone && digits && (apptPhone === digits || apptPhone.endsWith(digits) || digits.endsWith(apptPhone));
+      });
+      for (const appt of matches) {
+        const { error: linkErr } = await sb
+          .from("appointments")
+          .update({ patient_id: patient.id, updated_at: now })
+          .eq("id", appt.id);
+        if (!linkErr) linkedAppointments += 1;
+      }
+    }
+
+    return { ...patient, linkedAppointments };
   });
 
 // ── Update patient ────────────────────────────────────────────────────────────

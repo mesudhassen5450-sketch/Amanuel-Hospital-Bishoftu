@@ -19,6 +19,7 @@ const PORT = Number(process.env.PORT) || 3001;
 // ── CORS Configuration ─────────────────────────────────────────────────────
 const allowedOrigins = [
   "https://amanuelhospital.com.et",
+  "https://www.amanuelhospital.com.et",
   "https://amanuelhospital.netlify.app",
   "http://localhost:5173",
   "http://localhost:3000",
@@ -30,23 +31,36 @@ if (process.env.CORS_ORIGIN) {
   allowedOrigins.push(...customOrigins);
 }
 
+function isAllowedOrigin(origin?: string | null): boolean {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    if (host.endsWith(".netlify.app")) return true;
+    if (host.endsWith(".onrender.com")) return true;
+    if (host.endsWith("amanuelhospital.com.et")) return true;
+  } catch {
+    return false;
+  }
+  return false;
+}
+
 // ── Middlewares ─────────────────────────────────────────────────────────────
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps, curl, or Postman)
       if (!origin) return callback(null, true);
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.indexOf(origin) !== -1) {
+
+      if (isAllowedOrigin(origin)) {
         return callback(null, true);
       }
-      
+
       // Reject other origins
       console.warn(`[CORS] Blocked request from origin: ${origin}`);
       return callback(new Error("Not allowed by CORS"));
     },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   })
 );
@@ -105,12 +119,11 @@ const io = new SocketIOServer(server, {
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps)
       if (!origin) return callback(null, true);
-      
-      // Check if origin is in allowed list
-      if (allowedOrigins.indexOf(origin) !== -1) {
+
+      if (isAllowedOrigin(origin)) {
         return callback(null, true);
       }
-      
+
       // Reject other origins
       console.warn(`[Socket.IO CORS] Blocked request from origin: ${origin}`);
       return callback(new Error("Not allowed by CORS"));
@@ -130,6 +143,14 @@ console.log("[Socket.IO] Real-time call & queue system initialized");
 const connectedDoctors = new Map<string, string>(); // doctorUsername -> socketId
 const roomParticipants = new Map<string, Set<string>>(); // roomId -> Set of socketIds
 
+function normalizeConsultationRoomId(raw?: string | null): string {
+  if (!raw) return "";
+  const value = String(raw).trim();
+  if (!value) return "";
+  const cleaned = value.replace(/^(apt_|room_|call_)/i, "");
+  return `apt_${cleaned}`;
+}
+
 io.on("connection", (socket) => {
   console.log(`[Socket.IO] Client connected: ${socket.id}`);
 
@@ -143,8 +164,9 @@ io.on("connection", (socket) => {
   });
 
   // Join video consultation room
-  socket.on("join-room", (data: { roomId: string; userId: string; userRole?: string }) => {
-    const { roomId, userId, userRole } = data;
+  socket.on("join-room", (data: { roomId?: string; room_id?: string; userId: string; userRole?: string }) => {
+    const roomId = normalizeConsultationRoomId(data.roomId || data.room_id);
+    const { userId, userRole } = data;
     if (!roomId) return;
 
     socket.join(roomId);
@@ -160,8 +182,9 @@ io.on("connection", (socket) => {
   });
 
   // Leave consultation room
-  socket.on("leave-room", (data: { roomId: string; userId: string }) => {
-    const { roomId, userId } = data;
+  socket.on("leave-room", (data: { roomId?: string; room_id?: string; userId: string }) => {
+    const roomId = normalizeConsultationRoomId(data.roomId || data.room_id);
+    const { userId } = data;
     if (!roomId) return;
 
     socket.leave(roomId);
@@ -173,13 +196,20 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("user-left", { userId, socketId: socket.id });
   });
 
-  // Real-time chat message broadcast
+  // Real-time chat message broadcast (doctor <-> patient)
   socket.on("send-message", (messageData: any) => {
-    const { roomId } = messageData;
+    const roomId = normalizeConsultationRoomId(messageData.roomId || messageData.room_id);
     if (!roomId) return;
 
-    console.log(`[Socket.IO] Real-time message in room ${roomId}:`, messageData.message);
-    io.to(roomId).emit("receive-message", messageData);
+    const payload = {
+      ...messageData,
+      roomId,
+      room_id: roomId,
+    };
+
+    console.log(`[Socket.IO] Real-time message in room ${roomId}:`, payload.message);
+    // Broadcast to everyone in the room (including sender for multi-tab sync)
+    io.to(roomId).emit("receive-message", payload);
   });
 
   // Patient paid event
@@ -200,16 +230,22 @@ io.on("connection", (socket) => {
   });
 
   // WebRTC P2P Signaling Relays (Offer, Answer, ICE Candidate)
-  socket.on("offer", (data: { roomId: string; offer: any }) => {
-    socket.to(data.roomId).emit("offer", data);
+  socket.on("offer", (data: { roomId?: string; room_id?: string; offer: any }) => {
+    const roomId = normalizeConsultationRoomId(data.roomId || data.room_id);
+    if (!roomId) return;
+    socket.to(roomId).emit("offer", { ...data, roomId });
   });
 
-  socket.on("answer", (data: { roomId: string; answer: any }) => {
-    socket.to(data.roomId).emit("answer", data);
+  socket.on("answer", (data: { roomId?: string; room_id?: string; answer: any }) => {
+    const roomId = normalizeConsultationRoomId(data.roomId || data.room_id);
+    if (!roomId) return;
+    socket.to(roomId).emit("answer", { ...data, roomId });
   });
 
-  socket.on("ice-candidate", (data: { roomId: string; candidate: any }) => {
-    socket.to(data.roomId).emit("ice-candidate", data);
+  socket.on("ice-candidate", (data: { roomId?: string; room_id?: string; candidate: any }) => {
+    const roomId = normalizeConsultationRoomId(data.roomId || data.room_id);
+    if (!roomId) return;
+    socket.to(roomId).emit("ice-candidate", { ...data, roomId });
   });
 
   // Clean up on disconnect

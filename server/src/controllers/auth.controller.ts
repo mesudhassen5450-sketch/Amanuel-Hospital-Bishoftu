@@ -58,11 +58,20 @@ export const login = async (req: Request, res: Response) => {
             return res.status(403).json({ error: 'Account is deactivated. Contact administrator.' });
         }
 
+        const rawRole = String(staff.role || 'ADMIN').trim();
+        const normalizedRole = rawRole.toUpperCase().replace(/[\s-]+/g, '_');
+        const jwtRole =
+            normalizedRole === 'ADMINISTRATOR' ||
+            normalizedRole === 'SYSTEM_ADMIN' ||
+            normalizedRole === 'SUPER_ADMIN'
+                ? 'ADMIN'
+                : normalizedRole || 'ADMIN';
+
         const token = jwt.sign(
             { 
                 id: staff.id.toString(), 
                 username: staff.username, 
-                role: (staff.role || 'ADMIN').toUpperCase() 
+                role: jwtRole
             },
             JWT_SECRET,
             { expiresIn: '24h' }
