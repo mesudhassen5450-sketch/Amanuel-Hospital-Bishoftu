@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 import { io, Socket } from "socket.io-client";
+import { BACKEND_URL } from "./api/socket-client";
 
 interface AppointmentRequest {
   id: string;
@@ -30,7 +31,7 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
     // 1. Socket.io Real-Time Channel Registration & Event Listener with Reconnection Limits
     let socket: Socket | null = null;
     try {
-      socket = io("http://localhost:3001", {
+      socket = io(BACKEND_URL, {
         autoConnect: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 2000,
@@ -38,7 +39,7 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
       });
 
       socket.on("connect", () => {
-        console.log("[DoctorSocket] Connected to signaling server:", socket?.id);
+        console.log("[DoctorSocket] Connected to signaling server:", BACKEND_URL, socket?.id);
         socket?.emit("register-doctor", {
           doctorId: currentDoctorUsername,
           username: currentDoctorUsername,
@@ -47,7 +48,7 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
       });
 
       socket.on("connect_error", (err) => {
-        console.warn("[DoctorSocket] Connection refused to port 3001. Relying on Supabase Realtime fallback.");
+        console.warn("[DoctorSocket] Connection error:", err?.message || err, "— relying on Supabase Realtime fallback.");
       });
 
       socket.on("incoming-call", (data: any) => {

@@ -27,15 +27,34 @@ export function useDoctorsPresence() {
     try {
       setLoading(true);
 
-      // If Supabase is not configured, skip directly to the REST API fallback
-      if (!isSupabaseConfigured) {
-        try {
-          const response = await apiFetch("/api/doctors", { method: "GET" });
-          const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
-          setDoctorsList(result.doctors || []);
-        } catch {
-          setDoctorsList([]);
+      // Prefer Express public doctors API (same source as admin staff creates)
+      try {
+        const response = await apiFetch("/api/doctors", { method: "GET" });
+        const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
+        if (Array.isArray(result.doctors) && result.doctors.length >= 0) {
+          const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
+          setDoctorsList(
+            (result.doctors || []).map((doc: any, i: number) => ({
+              ...doc,
+              photo: doc.photo || photos[i % photos.length],
+              id: doc.id,
+              username: doc.username,
+              displayName: doc.displayName || doc.display_name || doc.username,
+              specialty: doc.specialty || "General Practice",
+              experience: doc.experience || "5+ years experience",
+              isOnline: Boolean(doc.isOnline ?? doc.is_online),
+              isActive: doc.isActive !== false && doc.is_active !== false,
+            }))
+          );
+          return;
         }
+      } catch (apiErr) {
+        console.warn("[Doctors] Express /api/doctors unavailable, trying Supabase:", apiErr);
+      }
+
+      // If Supabase is not configured, stop here
+      if (!isSupabaseConfigured) {
+        setDoctorsList([]);
         return;
       }
 
@@ -48,15 +67,8 @@ export function useDoctorsPresence() {
       let staffRows: any[] = data || [];
       if (error) {
         console.error("[Doctors] Supabase error:", error);
-        try {
-          const response = await apiFetch("/api/doctors", { method: "GET" });
-          const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
-          setDoctorsList(result.doctors || []);
-          return;
-        } catch {
-          setDoctorsList([]);
-          return;
-        }
+        setDoctorsList([]);
+        return;
       }
 
       staffRows = staffRows.filter(

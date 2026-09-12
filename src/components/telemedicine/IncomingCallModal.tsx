@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { getAudioNotification } from "@/lib/audio-utils";
 import { supabase } from "@/lib/supabase";
 import { io } from "socket.io-client";
+import { BACKEND_URL } from "@/lib/api/socket-client";
 
 interface IncomingCallModalProps {
   open: boolean;
@@ -100,7 +101,7 @@ export function IncomingCallModal({
 
       // Emit accept-call event via socket
       try {
-        const socket = io("http://localhost:3001");
+        const socket = io(BACKEND_URL);
         socket.emit("accept-call", {
           appointmentId: String(appointmentId),
           doctorUsername: currentDoctorUsername,
@@ -145,7 +146,7 @@ export function IncomingCallModal({
 
       // Emit decline-call event via socket
       try {
-        const socket = io("http://localhost:3001");
+        const socket = io(BACKEND_URL);
         socket.emit("decline-call", {
           appointmentId: String(appointmentId),
           doctorUsername: currentDoctorUsername,

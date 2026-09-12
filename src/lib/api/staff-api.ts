@@ -174,34 +174,35 @@ async function fetchStaffByUsername(username: string): Promise<any | null> {
 
 /**
  * GET /api/staff
- * Fetch all staff accounts
+ * Fetch all staff accounts (Express/Prisma first — same DB login uses).
+ * Supabase anon reads are RLS-limited and can hide admin creates/updates.
  */
 export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
   let rows: any[] | null = null;
 
-  const { data, error } = await supabase
-    .from("staff_accounts")
-    .select("id, username, role, display_name, is_active, is_online, last_seen, created_at, updated_at")
-    .order("created_at", { ascending: true });
+  // 1) Express first so Admin UI matches login/create/update
+  try {
+    const response = await apiFetch("/api/staff", { method: "GET" });
+    const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(response);
+    if (Array.isArray(result.staff)) {
+      rows = result.staff;
+    }
+  } catch (apiErr) {
+    console.warn("[Staff API] Express getAllStaff failed, trying Supabase:", apiErr);
+  }
 
-  if (!error && data) {
-    rows = data;
-  } else {
-    console.error("[Staff API] Supabase fetch error:", error);
-    const { data: rpcResult, error: rpcError } = await supabase.rpc("get_all_staff_accounts");
-    const parsed = parseRpcPayload(rpcResult);
-    if (!rpcError && parsed.success && Array.isArray(parsed.data)) {
-      rows = parsed.data;
+  // 2) Supabase fallback only if Express is unreachable
+  if (!rows) {
+    const { data, error } = await supabase
+      .from("staff_accounts")
+      .select("id, username, role, display_name, is_active, is_online, last_seen, created_at, updated_at")
+      .order("created_at", { ascending: true });
+
+    if (!error && data) {
+      rows = data;
     } else {
-      try {
-        const response = await apiFetch("/api/staff", { method: "GET" });
-        const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(response);
-        if (result.staff) {
-          return result.staff.filter((s: any) => s.role?.toUpperCase() !== "DELETED");
-        }
-      } catch {
-        return [];
-      }
+      console.error("[Staff API] Supabase fetch error:", error);
+      return [];
     }
   }
 
@@ -276,7 +277,8 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
     );
   }
 
-  const verified = (await fetchStaffByUsername(cleanUsername)) || created;
+  // Prefer Express response so Admin list stays in sync even when Supabase anon RLS hides the row
+  const verified = created || (await fetchStaffByUsername(cleanUsername));
   if (!verified || (!verified.id && !verified.username)) {
     throw new Error(
       lastError ||
@@ -306,11 +308,18 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
 export const updateStaffAccount = async (id: string | number, data: UpdateStaffData): Promise<StaffAccount> => {
   const cleanUsername = data.username.toLowerCase().trim();
   const role = canonicalRole(data.role);
-  const targetStr = String(id).trim();
-  let updated: any = null;
-  let lastError = "";
+  let previousUsername = "";
 
-  // 1) Express first — same database path that login reads
+  // Capture previous username (for doctor profile rename cleanup)
+  try {
+    const existing = await getAllStaffAccounts();
+    const match = existing.find((s) => String(s.id) === String(id));
+    previousUsername = match?.username?.toLowerCase() || "";
+  } catch {
+    // non-critical
+  }
+
+  let updated: any = null;
   try {
     const response = await apiFetch(`/api/staff/${id}`, {
       method: "PUT",
@@ -328,36 +337,33 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
     const result = await handleApiResponse<{ success: boolean; data: StaffAccount }>(response);
     updated = result.data;
   } catch (apiErr: any) {
-    lastError = apiErr?.message || "Failed to update login account on the server";
-    console.warn("[Staff API] Express updateStaff failed:", apiErr);
-  }
-
-  // 2) Supabase fallback only if Express is unreachable
-  if (!updated) {
-    const numId = parseInt(targetStr, 10);
-    if (!isNaN(numId)) {
-      const { data: rpcResult, error: rpcError } = await supabase.rpc("update_staff_account", {
-        p_id: numId,
-        p_username: cleanUsername,
-        p_role: role,
-        p_display_name: data.displayName.trim(),
-        p_is_active: data.isActive,
-      });
-      const parsed = parseRpcPayload(rpcResult);
-      if (!rpcError && parsed.success && parsed.data) {
-        updated = parsed.data;
-      } else {
-        lastError = parsed.error || rpcError?.message || lastError;
-      }
+    const msg = String(apiErr?.message || "").toLowerCase();
+    if (
+      msg.includes("insufficient permissions") ||
+      msg.includes("access denied") ||
+      msg.includes("unauthorized") ||
+      msg.includes("forbidden")
+    ) {
+      throw new Error(
+        "Access denied while updating staff. Sign out, sign in again as admin, then retry."
+      );
     }
+    throw new Error(apiErr?.message || "Failed to update staff account on the server.");
   }
 
-  const verified = (await fetchStaffByUsername(cleanUsername)) || updated;
-  if (!verified) {
-    throw new Error(lastError || "Failed to update staff account in the database.");
+  if (!updated) {
+    throw new Error("Failed to update staff account in the database.");
   }
+
+  // Prefer Express response — do not re-read stale Supabase anon cache
+  const verified = updated;
 
   if (role === "doctor") {
+    // If username changed, remove old doctors profile row so public page updates
+    if (previousUsername && previousUsername !== cleanUsername) {
+      await supabase.from("doctors").delete().ilike("username", previousUsername);
+      removeDoctorMetadata(previousUsername);
+    }
     await persistDoctorProfile(cleanUsername, {
       specialty: data.specialty,
       experience: data.experience,
@@ -426,33 +432,19 @@ export const toggleStaffStatus = async (id: string | number, data?: ToggleStatus
     });
     const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
     return result.data;
-  } catch (apiErr) {
-    console.warn("[Staff API] Express API toggleStatus failed, using Supabase fallback:", apiErr);
-    const targetStr = String(id).trim();
-    const numId = parseInt(targetStr, 10);
-
-    if (!isNaN(numId)) {
-      const { data: rpcResult, error } = await supabase.rpc("toggle_staff_account_status", { p_id: numId });
-      const parsed = parseRpcPayload(rpcResult);
-      if (!error && parsed.success && parsed.data) {
-        return mapStaffRow(parsed.data);
-      }
+  } catch (apiErr: any) {
+    const msg = String(apiErr?.message || "").toLowerCase();
+    if (
+      msg.includes("insufficient permissions") ||
+      msg.includes("access denied") ||
+      msg.includes("unauthorized") ||
+      msg.includes("forbidden")
+    ) {
+      throw new Error(
+        "Access denied while updating status. Sign out, sign in again as admin, then retry."
+      );
     }
-
-    let query = supabase.from("staff_accounts").select("is_active");
-    if (!isNaN(numId)) query = query.eq("id", numId);
-    else query = query.ilike("username", targetStr);
-
-    const { data: existing } = await query.single();
-    const newStatus = data?.isActive !== undefined ? data.isActive : existing ? !existing.is_active : true;
-
-    let updateQuery = supabase.from("staff_accounts").update({ is_active: newStatus });
-    if (!isNaN(numId)) updateQuery = updateQuery.eq("id", numId);
-    else updateQuery = updateQuery.ilike("username", targetStr);
-
-    const { data: updated, error } = await updateQuery.select().single();
-    if (error || !updated) throw new Error(error?.message || "Failed to update staff status");
-    return mapStaffRow(updated);
+    throw new Error(apiErr?.message || "Failed to update staff status on the server.");
   }
 };
 
@@ -462,9 +454,7 @@ export const toggleStaffStatus = async (id: string | number, data?: ToggleStatus
  */
 export const deleteStaffAccount = async (id: string | number, username?: string): Promise<void> => {
   const targetStr = String(id).trim();
-  const numId = parseInt(targetStr, 10);
   const lookup = username?.trim() || "";
-  let lastError = "";
 
   try {
     const response = await apiFetch(`/api/staff/${id}`, {
@@ -473,45 +463,27 @@ export const deleteStaffAccount = async (id: string | number, username?: string)
     });
     await handleApiResponse<{ success: boolean; message: string }>(response);
   } catch (apiErr: any) {
-    lastError = apiErr?.message || "Failed to delete staff on the login server";
-    console.warn("[Staff API] Express delete failed:", apiErr);
+    const lastError = apiErr?.message || "Failed to delete staff on the login server";
     if (/last active admin/i.test(lastError)) {
       throw new Error(lastError);
     }
-
-    let deleted = false;
-    if (!isNaN(numId)) {
-      const { data: rpcResult, error } = await supabase.rpc("delete_staff_account", { p_id: numId });
-      const parsed = parseRpcPayload(rpcResult);
-      if (!error && parsed.success) deleted = true;
-      else lastError = parsed.error || error?.message || lastError;
+    const msg = String(lastError).toLowerCase();
+    if (
+      msg.includes("insufficient permissions") ||
+      msg.includes("access denied") ||
+      msg.includes("unauthorized") ||
+      msg.includes("forbidden")
+    ) {
+      throw new Error(
+        "Access denied while deleting staff. Sign out, sign in again as admin, then retry."
+      );
     }
-
-    if (!deleted && lookup) {
-      await supabase.from("doctors").delete().ilike("username", lookup);
-      const { error } = await supabase.from("staff_accounts").delete().ilike("username", lookup);
-      if (!error) deleted = true;
-      else lastError = error.message || lastError;
-    }
-
-    if (!deleted && !isNaN(numId)) {
-      await supabase.from("doctors").delete().eq("id", numId);
-      const { error } = await supabase.from("staff_accounts").delete().eq("id", numId);
-      if (!error) deleted = true;
-      else lastError = error.message || lastError;
-    }
-
-    if (!deleted) {
-      throw new Error(lastError || "Failed to delete staff account from the database.");
-    }
+    throw new Error(lastError);
   }
 
+  // Best-effort public profile cleanup (does not affect login DB)
   if (lookup) {
     await supabase.from("doctors").delete().ilike("username", lookup);
-    await supabase.from("staff_accounts").delete().ilike("username", lookup);
-  }
-  if (!isNaN(numId)) {
-    await supabase.from("staff_accounts").delete().eq("id", numId);
   }
 
   markStaffAsDeletedLocally(targetStr, lookup || undefined);

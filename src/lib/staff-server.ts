@@ -792,7 +792,7 @@ export const getLabDashboardStats = createServerFn({ method: "POST" })
 
 // ── Lab: get all requests ─────────────────────────────────────────────────────
 export const getLabRequests = createServerFn({ method: "POST" })
-  .validator((d: { status?: string }) => d)
+  .validator((d: { status?: string; patientId?: number }) => d)
   .handler(async ({ data }) => {
     const sb = getSupabase();
     let q = sb
@@ -800,6 +800,7 @@ export const getLabRequests = createServerFn({ method: "POST" })
       .select("*, patients(id,mrn,full_name,phone)")
       .order("created_at", { ascending: false });
     if (data.status) q = q.eq("status", data.status);
+    if (data.patientId) q = q.eq("patient_id", data.patientId);
     const { data: rows, error } = await q;
     if (error) throw new Error(error.message);
     return (rows ?? []).map((r: any) => ({
@@ -906,9 +907,11 @@ export const createLabRequest = createServerFn({ method: "POST" })
     checkRole("createLabRequest", data.callerRole);
     const sb = getSupabase();
     const now = new Date().toISOString();
+    // Never insert client-only auth fields into lab_requests
+    const { callerRole: _callerRole, ...requestFields } = data;
     const { data: req, error } = await sb
       .from("lab_requests")
-      .insert({ ...data, status: "Requested", created_at: now, updated_at: now })
+      .insert({ ...requestFields, status: "Requested", created_at: now, updated_at: now })
       .select()
       .single();
     if (error) throw new Error(error.message);

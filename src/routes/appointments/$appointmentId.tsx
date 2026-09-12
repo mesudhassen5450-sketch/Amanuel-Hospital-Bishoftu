@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2, User, Clock, PhoneCall, Mic, MicOff, Camera, CameraOff, Video as VideoIcon, LayoutDashboard, Send, Paperclip, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { io } from "socket.io-client";
+import { BACKEND_URL } from "@/lib/api/socket-client";
 
 export const Route = createFileRoute("/appointments/$appointmentId")({
   head: () => ({ meta: [{ title: "Video Consultation — Dr. Amanuel Hospital" }] }),
@@ -155,7 +156,7 @@ function VideoConsultationPage() {
 
       // Emit patient-paid socket event to signaling server
       try {
-        const socket = io('http://localhost:3001');
+        const socket = io(BACKEND_URL);
         socket.emit('patient-paid', {
           appointmentId: String(numericId),
         });

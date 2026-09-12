@@ -28,6 +28,46 @@ interface ChatMessage {
   sender_role: 'doctor' | 'patient';
   message: string;
   created_at: string;
+  client_msg_id?: string;
+}
+
+function isTempMessageId(id: string | undefined | null): boolean {
+  return !!id && (String(id).startsWith("temp_") || String(id).startsWith("tmp_"));
+}
+
+/** Merge messages without keeping optimistic duplicates of persisted rows */
+function mergeChatMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
+  const byId = new Map<string, ChatMessage>();
+  const push = (m: ChatMessage) => {
+    const id = String(m.id);
+    if (byId.has(id)) {
+      byId.set(id, { ...byId.get(id)!, ...m });
+      return;
+    }
+    // Replace optimistic temp bubble with the real DB/socket row
+    if (!isTempMessageId(id)) {
+      for (const [key, prev] of byId) {
+        if (!isTempMessageId(key)) continue;
+        const sameClient =
+          (m.client_msg_id && prev.client_msg_id && m.client_msg_id === prev.client_msg_id) ||
+          (prev.id && m.client_msg_id && prev.id === m.client_msg_id);
+        const sameContent =
+          prev.sender_id === m.sender_id &&
+          prev.message === m.message &&
+          Math.abs(new Date(prev.created_at).getTime() - new Date(m.created_at).getTime()) < 15000;
+        if (sameClient || sameContent) {
+          byId.delete(key);
+          break;
+        }
+      }
+    }
+    byId.set(id, m);
+  };
+  for (const m of existing) push(m);
+  for (const m of incoming) push(m);
+  return Array.from(byId.values()).sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
 }
 
 function ConsultationRoomPage() {
@@ -168,25 +208,16 @@ function ConsultationRoomPage() {
     // Listen for incoming messages with duplicate prevention
     socketRef.current.on('receive-message', (newMessage: any) => {
       console.log('[Chat] Real-time message received:', newMessage);
-      setMessages((prev) => {
-        // Prevent duplicates by checking if message already exists
-        const exists = prev.some((m) => {
-          // Check by timestamp and sender for optimistic updates
-          return (
-            m.created_at === newMessage.created_at &&
-            m.sender_id === newMessage.sender_id &&
-            m.message === newMessage.message
-          );
-        });
-        
-        if (exists) {
-          console.log('[Chat] Duplicate message detected, skipping');
-          return prev;
-        }
-        
-        console.log('[Chat] Adding new message to state');
-        return [...prev, newMessage];
-      });
+      // Ignore our own socket echo — optimistic UI already shows it
+      if (
+        newMessage?.sender_id &&
+        String(newMessage.sender_id) === String(userId) &&
+        (isTempMessageId(newMessage.id) || newMessage.client_msg_id)
+      ) {
+        console.log('[Chat] Ignoring own socket echo');
+        return;
+      }
+      setMessages((prev) => mergeChatMessages(prev, [newMessage as ChatMessage]));
     });
 
     // Handle connection errors
@@ -233,19 +264,7 @@ function ConsultationRoomPage() {
 
         if (data) {
           console.log('[Chat] Loaded', data.length, 'historical messages');
-          setMessages((prev) => {
-            const byKey = new Map<string, ChatMessage>();
-            for (const m of data as ChatMessage[]) {
-              byKey.set(String(m.id), m);
-            }
-            for (const m of prev) {
-              const key = String(m.id);
-              if (!byKey.has(key)) byKey.set(key, m);
-            }
-            return Array.from(byKey.values()).sort(
-              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            );
-          });
+          setMessages((prev) => mergeChatMessages(prev, data as ChatMessage[]));
         }
       } catch (err) {
         console.error('[Chat] Error:', err);
@@ -271,17 +290,7 @@ function ConsultationRoomPage() {
         (payload) => {
           console.log('[Chat] Supabase Realtime message received:', payload.new);
           const newMessage = payload.new as ChatMessage;
-          
-          setMessages((prev) => {
-            // Check if message already exists
-            const exists = prev.some((m) => m.id === newMessage.id);
-            if (exists) {
-              console.log('[Chat] Message already exists (from Socket.IO), skipping');
-              return prev;
-            }
-            console.log('[Chat] Adding message from Supabase Realtime');
-            return [...prev, newMessage];
-          });
+          setMessages((prev) => mergeChatMessages(prev, [newMessage]));
         }
       )
       .subscribe((status) => {
@@ -289,7 +298,7 @@ function ConsultationRoomPage() {
       });
 
     // Polling fallback so messages still sync if sockets/realtime drop
-    const pollId = window.setInterval(fetchMessages, 4000);
+    const pollId = window.setInterval(fetchMessages, 8000);
 
     // Cleanup subscription
     return () => {
@@ -372,31 +381,34 @@ function ConsultationRoomPage() {
     setNewMessage('');
     
     // Create message payload with temporary ID
-    const messagePayload = {
-      id: `temp_${Date.now()}`, // Temporary ID for optimistic update
+    const tempId = `temp_${Date.now()}`;
+    const createdAt = new Date().toISOString();
+    const messagePayload: ChatMessage = {
+      id: tempId,
       appointment_id: id,
       room_id: roomId,
       sender_id: userId,
       sender_name: senderName,
       sender_role: userRole as 'doctor' | 'patient',
       message: messageText,
-      created_at: new Date().toISOString(),
+      created_at: createdAt,
+      client_msg_id: tempId,
     };
 
     // 1. Immediately push to local UI (optimistic update)
-    setMessages((prev) => [...prev, messagePayload]);
+    setMessages((prev) => mergeChatMessages(prev, [messagePayload]));
 
     // 2. Broadcast immediately over Socket.IO for real-time delivery
     socketRef.current.emit('send-message', {
       ...messagePayload,
       roomId,
       room_id: roomId,
-      client_msg_id: messagePayload.id,
+      client_msg_id: tempId,
     });
 
     // 3. Persist to Supabase in the background (non-blocking)
     try {
-      const { error } = await supabase
+      const { data: saved, error } = await supabase
         .from('consultation_messages')
         .insert([{
           appointment_id: id,
@@ -405,16 +417,23 @@ function ConsultationRoomPage() {
           sender_name: senderName,
           sender_role: userRole as 'doctor' | 'patient',
           message: messageText,
-          created_at: new Date().toISOString(),
-        }]);
+          created_at: createdAt,
+        }])
+        .select('*')
+        .single();
 
       if (error) {
         console.error('[Chat] Supabase save error:', error);
-        // Note: Message already sent via Socket.IO, so no need to restore input
+        return;
+      }
+
+      if (saved) {
+        setMessages((prev) =>
+          mergeChatMessages(prev, [{ ...(saved as ChatMessage), client_msg_id: tempId }])
+        );
       }
     } catch (err) {
       console.error('[Chat] Unexpected error saving message:', err);
-      // Message already broadcasted, just log the error
     }
   };
 
@@ -759,7 +778,7 @@ function ConsultationRoomPage() {
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="Type a message..."
-              className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-4 py-2 bg-white border border-slate-200 rounded-full text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <Button
               onClick={handleSendMessage}

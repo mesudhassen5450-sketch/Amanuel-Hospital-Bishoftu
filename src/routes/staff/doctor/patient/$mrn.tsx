@@ -8,6 +8,7 @@ import {
   getPatientConsultations,
   saveConsultation,
   createLabRequest,
+  getLabRequests,
   getPatientLabResults,
   getMedicines,
   savePrescription,
@@ -76,6 +77,7 @@ function DoctorPatientPage() {
   const [appointment, setAppointment] = useState<any>(null);
   const [consultations, setConsultations] = useState<any[]>([]);
   const [labResults, setLabResults]   = useState<any[]>([]);
+  const [labRequests, setLabRequests] = useState<any[]>([]);
   const [loading, setLoading]         = useState(true);
   const [saving, setSaving]           = useState(false);
   const [saved, setSaved]             = useState(false);
@@ -144,12 +146,14 @@ function DoctorPatientPage() {
         setPatient(p.patient);
         setAppointment(p.appointment);
         if (p.patient?.id) {
-          const [c, lr] = await Promise.all([
+          const [c, lr, lreq] = await Promise.all([
             getPatientConsultations({ data: { patientId: p.patient.id } }),
             getPatientLabResults({ data: { patientId: p.patient.id } }),
+            getLabRequests({ data: { patientId: p.patient.id } }),
           ]);
           setConsultations(c as any[]);
           setLabResults(lr as any[]);
+          setLabRequests(lreq as any[]);
           // Load prescriptions + medicines list
           const [rx, meds] = await Promise.all([
             getPatientPrescriptions({ data: { patientId: p.patient.id } }),
@@ -183,8 +187,12 @@ function DoctorPatientPage() {
       });
       toast.success(`Lab request for "${labForm.test_name}" submitted to laboratory.`);
       setLabForm({ test_name: "", clinical_notes: "" });
-      // Refresh lab results list
-      const lr = await getPatientLabResults({ data: { patientId: patient.id } });
+      // Refresh pending requests + completed results
+      const [lreq, lr] = await Promise.all([
+        getLabRequests({ data: { patientId: patient.id } }),
+        getPatientLabResults({ data: { patientId: patient.id } }),
+      ]);
+      setLabRequests(lreq as any[]);
       setLabResults(lr as any[]);
     } catch (err: any) {
       toast.error(err.message ?? "Failed to submit lab request.");
@@ -661,6 +669,48 @@ function DoctorPatientPage() {
                 </CardContent>
               </form>
             </Card>
+
+            {/* Pending lab requests for this patient */}
+            <div>
+              <h3 className="text-base font-bold text-foreground mb-3 flex items-center gap-2">
+                <FlaskConical className="h-4 w-4 text-primary" />
+                Pending Lab Requests
+              </h3>
+              {labRequests.filter((r) => r.status === "Requested" || r.status === "In Progress").length === 0 ? (
+                <Card className="border border-dashed border-border/60 rounded-2xl mb-6">
+                  <CardContent className="py-8 text-center text-muted-foreground">
+                    <p className="text-sm font-medium">No pending lab requests.</p>
+                    <p className="text-xs mt-1">Submit a test above — it will appear here for the laboratory team.</p>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="space-y-2 mb-6">
+                  {labRequests
+                    .filter((r) => r.status === "Requested" || r.status === "In Progress")
+                    .map((r: any) => (
+                      <Card key={r.id} className="border border-border/60 rounded-2xl shadow-sm">
+                        <CardContent className="p-4 flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-foreground">{r.testName}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              Requested by Dr. {r.doctorUsername || "—"} ·{" "}
+                              {r.createdAt
+                                ? new Date(r.createdAt).toLocaleString()
+                                : "—"}
+                            </p>
+                            {r.clinicalNotes ? (
+                              <p className="text-xs text-muted-foreground mt-1">{r.clinicalNotes}</p>
+                            ) : null}
+                          </div>
+                          <Badge className="bg-amber-500/10 text-amber-700 border-amber-500/20 border rounded-full text-xs font-semibold px-2.5">
+                            {r.status}
+                          </Badge>
+                        </CardContent>
+                      </Card>
+                    ))}
+                </div>
+              )}
+            </div>
 
             {/* Lab results for this patient */}
             <div>

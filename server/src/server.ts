@@ -208,8 +208,8 @@ io.on("connection", (socket) => {
     };
 
     console.log(`[Socket.IO] Real-time message in room ${roomId}:`, payload.message);
-    // Broadcast to everyone in the room (including sender for multi-tab sync)
-    io.to(roomId).emit("receive-message", payload);
+    // Broadcast to other participants only — sender already has optimistic UI
+    socket.to(roomId).emit("receive-message", payload);
   });
 
   // Patient paid event

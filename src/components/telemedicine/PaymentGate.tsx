@@ -6,6 +6,7 @@ import { Lock, CreditCard, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
 import { io } from "socket.io-client";
+import { BACKEND_URL } from "@/lib/api/socket-client";
 
 interface PaymentGateProps {
   onPayment?: () => void;
@@ -114,7 +115,7 @@ export function PaymentGate({ onPayment, onPaymentSuccess, isProcessingPayment =
 
         // Step C: Dispatch socket event 'patient-paid'
         try {
-          const socket = io('http://localhost:3001');
+          const socket = io(BACKEND_URL);
           socket.emit('patient-paid', {
             appointmentId: String(appointment.id),
           });
