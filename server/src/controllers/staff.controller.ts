@@ -180,7 +180,7 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
             const bio = req.body.bio || `Specialist physician at Dr. Amanuel Hospital.`;
 
             try {
-                doctorProfile = await prisma.doctor.upsert({
+                const upsertedDoctor = await prisma.doctor.upsert({
                     where: { username: newStaff.username },
                     update: {
                         specialty,
@@ -203,6 +203,13 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
                         bio: true,
                     },
                 });
+                // Prisma nullable fields are `string | null`; normalize to `string | undefined`
+                doctorProfile = {
+                    specialty: upsertedDoctor.specialty,
+                    experience: upsertedDoctor.experience ?? undefined,
+                    experienceYears: upsertedDoctor.experienceYears ?? null,
+                    bio: upsertedDoctor.bio ?? undefined,
+                };
                 console.log('[Staff Controller] Doctor profile created/updated for staff:', newStaff.username);
             } catch (docError: any) {
                 console.error('[Staff Controller] Doctor record creation failed:', docError.message);
@@ -368,7 +375,7 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
                         : req.body.experience_years != null
                           ? Number(req.body.experience_years)
                           : null;
-                doctorProfile = await prisma.doctor.upsert({
+                const upsertedDoctor = await prisma.doctor.upsert({
                     where: { username: updatedStaff.username },
                     update: {
                         specialty: specialty || 'General Practice',
@@ -399,6 +406,13 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
                         bio: true,
                     },
                 });
+                // Prisma nullable fields are `string | null`; normalize to `string | undefined`
+                doctorProfile = {
+                    specialty: upsertedDoctor.specialty,
+                    experience: upsertedDoctor.experience ?? undefined,
+                    experienceYears: upsertedDoctor.experienceYears ?? null,
+                    bio: upsertedDoctor.bio ?? undefined,
+                };
             } catch (docErr: any) {
                 console.error('[Staff Controller] Doctor profile update failed:', docErr.message);
                 return res.status(500).json({
