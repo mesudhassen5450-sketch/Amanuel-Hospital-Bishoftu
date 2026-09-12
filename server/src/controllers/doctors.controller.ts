@@ -10,10 +10,10 @@ export const getAllDoctors = async (req: Request, res: Response) => {
         // Fetch all staff accounts with role DOCTOR
         const doctorStaff = await prisma.staffAccount.findMany({
             where: {
-                role: {
-                    in: ['DOCTOR', 'doctor'],
-                },
                 isActive: true,
+                OR: [
+                    { role: { equals: 'doctor', mode: 'insensitive' } },
+                ],
             },
             select: {
                 id: true,

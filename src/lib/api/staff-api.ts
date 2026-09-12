@@ -474,55 +474,58 @@ export const toggleStaffStatus = async (id: string | number, data?: ToggleStatus
 export const deleteStaffAccount = async (id: string | number, username?: string): Promise<void> => {
   const targetStr = String(id).trim();
   const numId = parseInt(targetStr, 10);
-  let deleted = false;
+  const lookup = username?.trim() || "";
   let lastError = "";
 
-  if (!isNaN(numId)) {
-    const { data: rpcResult, error } = await supabase.rpc("delete_staff_account", { p_id: numId });
-    const parsed = parseRpcPayload(rpcResult);
-    if (!error && parsed.success) {
-      deleted = true;
-    } else {
-      lastError = parsed.error || error?.message || "";
+  try {
+    const response = await apiFetch(`/api/staff/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify({ username: lookup || undefined }),
+    });
+    await handleApiResponse<{ success: boolean; message: string }>(response);
+  } catch (apiErr: any) {
+    lastError = apiErr?.message || "Failed to delete staff on the login server";
+    console.warn("[Staff API] Express delete failed:", apiErr);
+    if (/last active admin/i.test(lastError)) {
+      throw new Error(lastError);
     }
-  }
 
-  if (!deleted) {
-    try {
-      const response = await apiFetch(`/api/staff/${id}`, { method: "DELETE" });
-      await handleApiResponse<{ success: boolean; message: string }>(response);
-      deleted = true;
-    } catch (apiErr: any) {
-      lastError = apiErr?.message || lastError;
-    }
-  }
-
-  if (!deleted) {
-    if (username) {
-      await supabase.from("doctors").delete().ilike("username", username.trim());
-    }
+    let deleted = false;
     if (!isNaN(numId)) {
+      const { data: rpcResult, error } = await supabase.rpc("delete_staff_account", { p_id: numId });
+      const parsed = parseRpcPayload(rpcResult);
+      if (!error && parsed.success) deleted = true;
+      else lastError = parsed.error || error?.message || lastError;
+    }
+
+    if (!deleted && lookup) {
+      await supabase.from("doctors").delete().ilike("username", lookup);
+      const { error } = await supabase.from("staff_accounts").delete().ilike("username", lookup);
+      if (!error) deleted = true;
+      else lastError = error.message || lastError;
+    }
+
+    if (!deleted && !isNaN(numId)) {
+      await supabase.from("doctors").delete().eq("id", numId);
       const { error } = await supabase.from("staff_accounts").delete().eq("id", numId);
       if (!error) deleted = true;
-      else lastError = error.message;
+      else lastError = error.message || lastError;
     }
-    if (!deleted && username) {
-      const { error } = await supabase.from("staff_accounts").delete().ilike("username", username.trim());
-      if (!error) deleted = true;
-      else lastError = error.message;
-    }
+
     if (!deleted) {
-      const { error } = await supabase.from("staff_accounts").delete().ilike("username", targetStr);
-      if (!error) deleted = true;
-      else lastError = error.message;
+      throw new Error(lastError || "Failed to delete staff account from the database.");
     }
   }
 
-  if (!deleted) {
-    throw new Error(lastError || "Failed to delete staff account from the database.");
+  if (lookup) {
+    await supabase.from("doctors").delete().ilike("username", lookup);
+    await supabase.from("staff_accounts").delete().ilike("username", lookup);
+  }
+  if (!isNaN(numId)) {
+    await supabase.from("staff_accounts").delete().eq("id", numId);
   }
 
-  markStaffAsDeletedLocally(targetStr, username);
-  if (username) removeDoctorMetadata(username);
+  markStaffAsDeletedLocally(targetStr, lookup || undefined);
+  if (lookup) removeDoctorMetadata(lookup);
   removeDoctorMetadata(targetStr);
 };

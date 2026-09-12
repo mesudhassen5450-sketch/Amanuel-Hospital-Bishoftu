@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 import { JWT_SECRET } from '../utils/auth.js';
+import { resolveStaffAccount } from '../utils/staffAccount.js';
 
 async function passwordsMatch(plain: string, storedHash: string | null | undefined): Promise<boolean> {
     const password = plain.trim();
@@ -41,15 +42,7 @@ export const login = async (req: Request, res: Response) => {
 
     try {
         const cleanUsername = username.trim();
-
-        const staff = await prisma.staffAccount.findFirst({
-            where: {
-                username: {
-                    equals: cleanUsername,
-                    mode: 'insensitive'
-                }
-            }
-        });
+        const staff = await resolveStaffAccount(prisma, { username: cleanUsername });
 
         if (!staff) {
             return res.status(401).json({ error: 'Invalid username or password' });

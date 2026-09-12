@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { prisma } from '../config/db.js';
 import { hashPassword } from '../utils/auth.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
+import { deleteLinkedDoctorProfile, resolveStaffAccount } from '../utils/staffAccount.js';
 
 /**
  * GET /api/staff
@@ -168,33 +169,8 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
     }
 };
 
-/**
- * Helper to safely find a staff account by numeric ID (BigInt), string ID, or username
- */
-const findStaffAccount = async (idParam: string) => {
-    if (!idParam) return null;
-
-    let targetId: any = idParam;
-    try {
-        targetId = BigInt(idParam);
-    } catch {
-        // Keep original string if BigInt conversion fails
-    }
-
-    try {
-        const found = await prisma.staffAccount.findFirst({
-            where: {
-                OR: [
-                    { id: targetId },
-                    { username: idParam.toLowerCase().trim() },
-                ],
-            },
-        });
-        return found;
-    } catch (err: any) {
-        console.error('[Staff Controller] findStaffAccount error:', err.message);
-        return null;
-    }
+const findStaffAccount = async (idParam?: string | null, username?: string | null) => {
+    return resolveStaffAccount(prisma, { id: idParam, username });
 };
 
 /**
@@ -242,7 +218,7 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
         const formattedRole = role.toLowerCase();
 
         // Check if staff exists safely via BigInt or username
-        const existingStaff = await findStaffAccount(rawId);
+        const existingStaff = await findStaffAccount(rawId, username);
 
         if (!existingStaff) {
             return res.status(404).json({
@@ -358,18 +334,7 @@ export const resetStaffPassword = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // ID first, then username so reset updates the same row login checks
-        let existingStaff = rawId ? await findStaffAccount(rawId) : null;
-        if (!existingStaff && username) {
-            existingStaff = await prisma.staffAccount.findFirst({
-                where: {
-                    username: {
-                        equals: String(username).trim(),
-                        mode: 'insensitive',
-                    },
-                },
-            });
-        }
+        const existingStaff = await findStaffAccount(rawId, username);
 
         if (!existingStaff) {
             return res.status(404).json({
@@ -423,7 +388,7 @@ export const toggleStaffStatus = async (req: AuthRequest, res: Response) => {
         }
 
         // Check if staff exists
-        const existingStaff = await findStaffAccount(rawId);
+        const existingStaff = await findStaffAccount(rawId, req.body?.username);
 
         if (!existingStaff) {
             return res.status(404).json({
@@ -432,7 +397,6 @@ export const toggleStaffStatus = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // Determine new status (toggle if not provided)
         const newStatus = isActive !== undefined ? isActive : !existingStaff.isActive;
 
         // Prevent deactivating the last admin
@@ -496,15 +460,16 @@ export const deleteStaffAccount = async (req: AuthRequest, res: Response) => {
             ? req.params.id[0] 
             : req.params.id;
 
-        if (!rawId) {
+        const { username } = req.body || {};
+
+        if (!rawId && !username) {
             return res.status(400).json({
                 success: false,
                 error: 'Valid staff ID is required',
             });
         }
 
-        // Check if staff exists
-        const existingStaff = await findStaffAccount(rawId);
+        const existingStaff = await findStaffAccount(rawId, username);
 
         if (!existingStaff) {
             return res.status(404).json({
@@ -513,16 +478,20 @@ export const deleteStaffAccount = async (req: AuthRequest, res: Response) => {
             });
         }
 
-        // Prevent deleting the last admin
-        if (existingStaff.role?.toLowerCase() === 'admin') {
-            const activeAdminCount = await prisma.staffAccount.count({
+        const roleKey = String(existingStaff.role || '').toLowerCase();
+        if (roleKey === 'admin' || roleKey === 'administrator') {
+            const admins = await prisma.staffAccount.findMany({
                 where: {
-                    role: { in: ['ADMIN', 'admin'] },
                     isActive: true,
+                    OR: [
+                        { role: { equals: 'admin', mode: 'insensitive' } },
+                        { role: { equals: 'administrator', mode: 'insensitive' } },
+                    ],
                 },
+                select: { id: true },
             });
 
-            if (activeAdminCount <= 1) {
+            if (admins.length <= 1) {
                 return res.status(400).json({
                     success: false,
                     error: 'Cannot delete the last active admin account',
@@ -530,18 +499,8 @@ export const deleteStaffAccount = async (req: AuthRequest, res: Response) => {
             }
         }
 
-        // If staff is doctor, delete linked doctor record first
-        if (existingStaff.role?.toLowerCase() === 'doctor') {
-            try {
-                await prisma.doctor.deleteMany({
-                    where: { username: existingStaff.username },
-                });
-            } catch (docErr: any) {
-                console.warn('[Staff Controller] Cleaned up doctor profile:', docErr.message);
-            }
-        }
+        await deleteLinkedDoctorProfile(prisma, existingStaff.username);
 
-        // Delete staff account
         await prisma.staffAccount.delete({
             where: { id: existingStaff.id },
         });

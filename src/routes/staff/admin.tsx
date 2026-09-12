@@ -306,17 +306,15 @@ function AdminDashboardPage() {
       const targetId = selectedStaff.id;
       const targetUsername = selectedStaff.username;
       
-      // Optimistically remove from UI state
+      await StaffAPI.deleteStaffAccount(targetId, targetUsername);
+
       setStaffAccounts((prev) =>
         prev.filter(
           (s) => String(s.id) !== String(targetId) && s.username?.toLowerCase() !== targetUsername?.toLowerCase()
         )
       );
 
-      // Attempt backend/Supabase cascading deletion
-      await StaffAPI.deleteStaffAccount(targetId, targetUsername);
-
-      toast.success("Staff account deleted successfully");
+      toast.success("Staff account deleted from the database");
       setDeleteDialogOpen(false);
       await fetchStaffAccounts();
     } catch (error: any) {
@@ -1073,7 +1071,12 @@ function AdminDashboardPage() {
                 Reset Password
               </DialogTitle>
               <DialogDescription className="text-xs">
-                Enter a new password for {selectedStaff?.displayName || selectedStaff?.username}
+                Enter a new password for {selectedStaff?.displayName || selectedStaff?.username}.
+                {selectedStaff?.username ? (
+                  <>
+                    {" "}Login username: <span className="font-mono font-semibold">{selectedStaff.username}</span>
+                  </>
+                ) : null}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
@@ -1170,9 +1173,14 @@ function AdminDashboardPage() {
                 Delete Staff Account
               </AlertDialogTitle>
               <AlertDialogDescription className="text-xs text-muted-foreground mt-2">
-                Are you sure you want to permanently delete the account for{" "}
-                <span className="font-semibold text-foreground">{selectedStaff?.displayName || selectedStaff?.username}</span>?
-                This action cannot be undone and will remove all access for this staff member.
+                Are you sure you want to permanently delete{" "}
+                <span className="font-semibold text-foreground">{selectedStaff?.displayName || selectedStaff?.username}</span>
+                {selectedStaff?.username ? (
+                  <>
+                    {" "}(<span className="font-mono">{selectedStaff.username}</span>)
+                  </>
+                ) : null}
+                ? This removes the account from the database for reception, cashier, laboratory, pharmacy, staff, and doctors. Deleted doctors also disappear from the public doctors page.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter className="pt-3">
