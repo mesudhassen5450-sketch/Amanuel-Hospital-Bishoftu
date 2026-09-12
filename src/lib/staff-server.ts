@@ -1249,13 +1249,14 @@ export const createStaffAccount = createServerFn({ method: "POST" })
     checkRole("createStaffAccount", data.callerRole);
     const sb = getSupabase();
 
-    // Validate password strength
     if (data.password.length < 6) {
       throw new Error("Password must be at least 6 characters long");
     }
 
+    const username = data.username.toLowerCase().trim();
+
     const { data: result, error } = await sb.rpc("create_staff_account", {
-      p_username: data.username.toLowerCase().trim(),
+      p_username: username,
       p_password: data.password,
       p_role: data.role,
       p_display_name: data.displayName,
@@ -1269,6 +1270,20 @@ export const createStaffAccount = createServerFn({ method: "POST" })
     const parsed = result as { success: boolean; data?: any; error?: string };
     if (!parsed.success) {
       throw new Error(parsed.error ?? "Failed to create staff account");
+    }
+
+    // Force bcrypt hash compatible with Express /api/auth/login (bcryptjs)
+    const bcrypt = await import("bcryptjs");
+    const passwordHash = await bcrypt.hash(data.password, 10);
+    const { error: hashError } = await sb
+      .from("staff_accounts")
+      .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+      .eq("username", username);
+
+    if (hashError) {
+      throw new Error(
+        `Account created but login password could not be set (${hashError.message}). Use Admin → Reset Password.`
+      );
     }
 
     return parsed.data;

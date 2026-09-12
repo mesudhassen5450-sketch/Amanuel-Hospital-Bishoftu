@@ -219,7 +219,9 @@ export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
 
 /**
  * POST /api/staff
- * Create a new staff account. Never report success unless a DB row exists.
+ * Create a new staff account.
+ * Login uses Render/Express — create MUST write password_hash through that same path
+ * or the new account will show in Admin but return 401 on /api/auth/login.
  */
 export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAccount> => {
   const role = canonicalRole(data.role);
@@ -232,59 +234,59 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
   let created: any = null;
   let lastError = "";
 
-  const { data: rpcResult, error: rpcError } = await supabase.rpc("create_staff_account", {
-    p_username: cleanUsername,
-    p_password: data.password,
-    p_role: role,
-    p_display_name: displayName,
-    p_is_active: isActive,
-  });
-  const parsed = parseRpcPayload(rpcResult);
-  if (!rpcError && parsed.success && parsed.data) {
-    created = parsed.data;
-  } else {
-    lastError = parsed.error || rpcError?.message || "";
+  // 1) Express first — same bcrypt hash path that login verifies
+  try {
+    const response = await apiFetch("/api/staff", {
+      method: "POST",
+      body: JSON.stringify({
+        username: cleanUsername,
+        password: data.password,
+        role,
+        displayName,
+        isActive,
+        specialty: data.specialty,
+        experience: data.experience,
+        experienceYears: data.experienceYears,
+        bio: data.bio,
+      }),
+    });
+    const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
+    created = result.data;
+  } catch (apiErr: any) {
+    lastError = apiErr?.message || "Failed to create login account on the server";
+    console.warn("[Staff API] Express createStaff failed:", apiErr);
   }
 
+  // 2) Supabase RPC fallback only if Express is unreachable — then force Express password sync
   if (!created) {
-    const insertPayload: any = {
-      username: cleanUsername,
-      password_hash: data.password,
-      role,
-      display_name: displayName,
-      is_active: isActive,
-    };
-    const { data: inserted, error: sbError } = await supabase
-      .from("staff_accounts")
-      .insert(insertPayload)
-      .select()
-      .single();
-
-    if (inserted) {
-      created = inserted;
+    const { data: rpcResult, error: rpcError } = await supabase.rpc("create_staff_account", {
+      p_username: cleanUsername,
+      p_password: data.password,
+      p_role: role,
+      p_display_name: displayName,
+      p_is_active: isActive,
+    });
+    const parsed = parseRpcPayload(rpcResult);
+    if (!rpcError && parsed.success && parsed.data) {
+      created = parsed.data;
+      // Align password with Express/bcrypt so /api/auth/login accepts it
+      try {
+        const id = created.id ?? created.username;
+        await resetStaffPassword(id, {
+          newPassword: data.password,
+          username: cleanUsername,
+        });
+      } catch (syncErr: any) {
+        console.warn("[Staff API] Password sync after RPC create failed:", syncErr);
+        lastError =
+          syncErr?.message ||
+          "Account was created but login password could not be synced. Use Admin → Reset Password.";
+      }
     } else {
-      lastError = sbError?.message || lastError;
-      if (
-        sbError?.code === "23505" ||
-        sbError?.message?.toLowerCase().includes("unique") ||
-        sbError?.message?.toLowerCase().includes("duplicate") ||
-        lastError.toLowerCase().includes("already exists")
-      ) {
+      lastError = parsed.error || rpcError?.message || lastError;
+      if (lastError.toLowerCase().includes("already exists") || lastError.toLowerCase().includes("taken")) {
         throw new Error(`Username "${data.username}" is already taken. Please choose a different username.`);
       }
-    }
-  }
-
-  if (!created) {
-    try {
-      const response = await apiFetch("/api/staff", {
-        method: "POST",
-        body: JSON.stringify({ ...data, role }),
-      });
-      const result = await handleApiResponse<{ success: boolean; data: StaffAccount; message: string }>(response);
-      created = result.data;
-    } catch (apiErr: any) {
-      lastError = apiErr?.message || lastError;
     }
   }
 
@@ -292,7 +294,7 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
   if (!verified || (!verified.id && !verified.username)) {
     throw new Error(
       lastError ||
-        "Staff account was not saved to the database. Apply supabase/migrations/fix_staff_doctors_rls.sql in the hosted Supabase project, then try again."
+        "Staff account was not saved. Sign in as admin again, then create the account."
     );
   }
 

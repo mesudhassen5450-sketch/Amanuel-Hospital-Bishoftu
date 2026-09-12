@@ -128,7 +128,18 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
         if (formattedRole === 'doctor') {
             try {
                 const specialty = req.body.specialty || req.body.specialization || 'General Practice';
-                const experience = req.body.experience ? String(req.body.experience) : '5+ years';
+                const experienceYears =
+                    req.body.experienceYears != null
+                        ? Number(req.body.experienceYears)
+                        : req.body.experience_years != null
+                          ? Number(req.body.experience_years)
+                          : null;
+                const experience =
+                    req.body.experience
+                        ? String(req.body.experience)
+                        : experienceYears
+                          ? `${experienceYears}+ years`
+                          : '5+ years';
                 const bio = req.body.bio || `Specialist physician at Dr. Amanuel Hospital.`;
 
                 await prisma.doctor.upsert({
@@ -136,12 +147,14 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
                     update: {
                         specialty,
                         experience,
+                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
                         bio,
                     },
                     create: {
                         username: newStaff.username,
                         specialty,
                         experience,
+                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
                         bio,
                         isAvailable: true,
                     },

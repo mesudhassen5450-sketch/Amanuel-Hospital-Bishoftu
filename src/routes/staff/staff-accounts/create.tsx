@@ -1,9 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { useStaffAuth } from "@/lib/staff-auth";
 import { StaffLayout } from "@/components/staff/StaffLayout";
 import { StaffGuard } from "@/components/staff/StaffGuard";
-import { createStaffAccount } from "@/lib/staff-server";
+import * as StaffAPI from "@/lib/api/staff-api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,7 +18,6 @@ export const Route = createFileRoute("/staff/staff-accounts/create")({
 });
 
 function CreateStaffAccountPage() {
-  const { user } = useStaffAuth();
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     displayName: "",
@@ -61,17 +59,14 @@ function CreateStaffAccountPage() {
 
     try {
       setLoading(true);
-      await createStaffAccount({
-        data: {
-          username: formData.username.trim(),
-          password: formData.password,
-          role: formData.role,
-          displayName: formData.displayName.trim(),
-          isActive: formData.isActive,
-          callerRole: user?.role as string | undefined,
-        },
+      await StaffAPI.createStaffAccount({
+        username: formData.username.trim(),
+        password: formData.password,
+        role: formData.role,
+        displayName: formData.displayName.trim(),
+        isActive: formData.isActive,
       });
-      toast.success("Staff account created successfully");
+      toast.success("Staff account created successfully — you can log in with this username and password now");
       // Reset form
       setFormData({
         displayName: "",
