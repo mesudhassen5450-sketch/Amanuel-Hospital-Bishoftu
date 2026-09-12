@@ -1,20 +1,20 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/db.js';
 import { isEffectivelyOnline } from '../utils/onlineStatus.js';
+import { loadDoctorProfileMap } from '../utils/doctorProfile.js';
 
 /**
  * GET /api/doctors
- * Public endpoint: Retrieve all active doctors for public showcase
+ * Public endpoint: active doctors for the public doctors page.
+ * Specialty/bio/experience come from the doctors table joined by username
+ * (same rows Admin create/edit writes through Express).
  */
-export const getAllDoctors = async (req: Request, res: Response) => {
+export const getAllDoctors = async (_req: Request, res: Response) => {
     try {
-        // Fetch all staff accounts with role DOCTOR
         const doctorStaff = await prisma.staffAccount.findMany({
             where: {
                 isActive: true,
-                OR: [
-                    { role: { equals: 'doctor', mode: 'insensitive' } },
-                ],
+                OR: [{ role: { equals: 'doctor', mode: 'insensitive' } }],
             },
             select: {
                 id: true,
@@ -25,45 +25,13 @@ export const getAllDoctors = async (req: Request, res: Response) => {
                 lastSeen: true,
                 createdAt: true,
             },
-            orderBy: {
-                createdAt: 'asc',
-            },
+            orderBy: { createdAt: 'asc' },
         });
 
-        // Safely fetch doctor profiles for specialty, experience, and bio
-        let doctorProfiles: any[] = [];
-        try {
-            doctorProfiles = await prisma.doctor.findMany({
-                where: {
-                    username: {
-                        in: doctorStaff.map(s => s.username),
-                    },
-                },
-                select: {
-                    username: true,
-                    specialty: true,
-                    experience: true,
-                    experienceYears: true,
-                    consultationFee: true,
-                    rating: true,
-                    status: true,
-                    bio: true,
-                    isAvailable: true,
-                },
-                orderBy: {
-                    // Preserve first-come, first-served insertion order
-                    createdAt: 'asc',
-                },
-            });
-        } catch (e: any) {
-            console.warn('[Doctors Controller] Optional Doctor table query warning:', e.message);
-        }
-
-        const profileMap = new Map(doctorProfiles.map(p => [p.username.toLowerCase(), p]));
+        const profileMap = await loadDoctorProfileMap(prisma);
         const nowMs = Date.now();
         const staleOnlineIds: bigint[] = [];
 
-        // Map doctors into unified structure for frontend card grid
         const doctors = doctorStaff.map((staff, index) => {
             const photos = ['/doctor1.jpg', '/doctor2.jpg', '/doctor3.jpg'];
             const photo = photos[index % photos.length];
@@ -73,7 +41,6 @@ export const getAllDoctors = async (req: Request, res: Response) => {
                 staleOnlineIds.push(staff.id);
             }
 
-            // Resolve experience string: prefer numeric experience_years, then legacy string
             const rawExpYears = profile?.experienceYears;
             const rawExpLegacy = profile?.experience;
             let experience: string;
@@ -94,9 +61,8 @@ export const getAllDoctors = async (req: Request, res: Response) => {
                 specialty: profile?.specialty || 'General Practice',
                 experienceYears: rawExpYears ?? null,
                 experience,
-                consultationFee: profile?.consultationFee != null
-                    ? Number(profile.consultationFee)
-                    : null,
+                consultationFee:
+                    profile?.consultationFee != null ? Number(profile.consultationFee) : null,
                 rating: profile?.rating != null ? Number(profile.rating) : null,
                 status: profile?.status ?? null,
                 bio: profile?.bio || 'Dedicated medical specialist at Dr. Amanuel Hospital.',

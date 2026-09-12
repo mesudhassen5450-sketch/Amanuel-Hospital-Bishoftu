@@ -136,8 +136,15 @@ function AdminDashboardPage() {
 
     try {
       if (!opts?.silent) setLoading(true);
-      const accounts = await StaffAPI.getAllStaffAccounts();
-      // Ensure we always set an array, fallback to empty array if undefined
+      let accounts = await StaffAPI.getAllStaffAccounts();
+      // One-time heal: Admin may show localStorage bios while public /doctors still has defaults
+      if (!opts?.silent && Array.isArray(accounts) && accounts.length > 0) {
+        try {
+          accounts = await StaffAPI.syncCachedDoctorProfilesToServer(accounts);
+        } catch (syncErr) {
+          console.warn("Doctor profile sync from local cache skipped:", syncErr);
+        }
+      }
       setStaffAccounts(Array.isArray(accounts) ? accounts : []);
       setErrorState(null);
     } catch (error: any) {
@@ -216,19 +223,27 @@ function AdminDashboardPage() {
     try {
       setFormLoading(true);
       
-      // Use custom specialty if "Other" is selected
-      const finalSpecialty = editForm.specialty === "Other" 
+      const finalSpecialty = editForm.specialty === "Other"
         ? editForm.customSpecialty.trim() || "General Practice"
         : editForm.specialty;
-      
+      const experienceYears =
+        editForm.role.toLowerCase() === "doctor" ? editForm.experienceYears : undefined;
+      const experience =
+        experienceYears != null
+          ? experienceYears >= 30
+            ? "30+ years experience"
+            : `${experienceYears}+ years experience`
+          : undefined;
+
       await StaffAPI.updateStaffAccount(selectedStaff.id, {
         username: editForm.username,
         role: editForm.role,
         displayName: editForm.displayName,
         isActive: editForm.isActive,
-        specialty: editForm.role.toLowerCase() === 'doctor' ? finalSpecialty : undefined,
-        experienceYears: editForm.role.toLowerCase() === 'doctor' ? editForm.experienceYears : undefined,
-        bio: editForm.role.toLowerCase() === 'doctor' ? editForm.bio : undefined,
+        specialty: editForm.role.toLowerCase() === "doctor" ? finalSpecialty : undefined,
+        experience,
+        experienceYears,
+        bio: editForm.role.toLowerCase() === "doctor" ? editForm.bio : undefined,
       });
       toast.success("Staff account updated successfully");
       setEditDialogOpen(false);
@@ -381,7 +396,7 @@ function AdminDashboardPage() {
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"
-                onClick={fetchStaffAccounts}
+                onClick={() => void fetchStaffAccounts()}
                 disabled={loading}
                 className="gap-2 rounded-xl"
               >
@@ -500,7 +515,7 @@ function AdminDashboardPage() {
                 <p className="font-semibold">Database Error</p>
                 <p className="text-xs text-destructive/80 mt-0.5">{errorState}</p>
               </div>
-              <Button size="sm" variant="outline" onClick={fetchStaffAccounts} className="rounded-xl text-xs">
+              <Button size="sm" variant="outline" onClick={() => void fetchStaffAccounts()} className="rounded-xl text-xs">
                 Retry
               </Button>
             </div>

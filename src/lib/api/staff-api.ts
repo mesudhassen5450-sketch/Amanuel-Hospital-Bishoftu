@@ -11,7 +11,7 @@ import {
 } from "../doctor-metadata";
 
 /** Bump when admin staff sync changes — search for this in the deployed JS bundle. */
-export const STAFF_API_SYNC_VERSION = "express-only-staff-v4-final";
+export const STAFF_API_SYNC_VERSION = "express-doctor-profile-public-v5";
 
 export interface StaffAccount {
   id: string | number;
@@ -90,8 +90,11 @@ function mapStaffRow(
 ): StaffAccount {
   const username = account.username || account.userName;
   const role = account.role;
-  const meta = getDoctorMetadata(username);
-  const doctor = isDoctorRole(role);
+  // localStorage is display/migration only — public /doctors never reads it
+  const meta = isDoctorRole(role) ? getDoctorMetadata(username) : null;
+  const specialty = profile?.specialty || account.specialty || meta?.specialty || undefined;
+  const experience = profile?.experience || account.experience || meta?.experience || undefined;
+  const bio = profile?.bio || account.bio || meta?.bio || undefined;
   return {
     id: account.id != null ? account.id.toString() : "",
     username,
@@ -102,10 +105,60 @@ function mapStaffRow(
     lastSeen: account.last_seen ?? account.lastSeen ?? null,
     createdAt: account.created_at ?? account.createdAt ?? new Date().toISOString(),
     updatedAt: account.updated_at ?? account.updatedAt ?? new Date().toISOString(),
-    specialty: profile?.specialty || meta?.specialty || undefined,
-    experience: profile?.experience || meta?.experience || undefined,
-    bio: profile?.bio || meta?.bio,
+    specialty,
+    experience,
+    experienceYears:
+      profile?.experienceYears ?? account.experienceYears ?? account.experience_years ?? null,
+    bio,
   };
+}
+
+/**
+ * Push browser-cached doctor specialty/bio into Express when the public DB row is missing.
+ * Fixes Admin looking correct (localStorage) while /doctors still shows defaults.
+ */
+export async function syncCachedDoctorProfilesToServer(
+  accounts: StaffAccount[]
+): Promise<StaffAccount[]> {
+  const synced = [...accounts];
+  for (let i = 0; i < synced.length; i++) {
+    const account = synced[i];
+    if (!isDoctorRole(account.role) || !account.id) continue;
+
+    const meta = getDoctorMetadata(account.username);
+    if (!meta?.specialty && !meta?.bio) continue;
+
+    // Only migrate when Express still has empty/default profile but local cache has real data
+    const needsMigrate =
+      (!account.specialty || account.specialty === "General Practice") &&
+      Boolean(meta.specialty) &&
+      meta.specialty !== "General Practice";
+    const needsBioMigrate =
+      (!account.bio ||
+        account.bio === "Dedicated medical specialist at Dr. Amanuel Hospital." ||
+        account.bio === "Specialist physician at Dr. Amanuel Hospital.") &&
+      Boolean(meta.bio);
+
+    if (!needsMigrate && !needsBioMigrate) continue;
+
+    try {
+      const yearsMatch = String(meta.experience || "").match(/(\d+)/);
+      const experienceYears = yearsMatch ? Number(yearsMatch[1]) : null;
+      synced[i] = await updateStaffAccount(account.id, {
+        username: account.username,
+        role: account.role,
+        displayName: account.displayName || account.username,
+        isActive: account.isActive,
+        specialty: meta.specialty || account.specialty || "General Practice",
+        experience: meta.experience || account.experience,
+        experienceYears,
+        bio: meta.bio || account.bio || "Specialist physician at Dr. Amanuel Hospital.",
+      });
+    } catch (err) {
+      console.warn("[Staff API] Cached doctor profile sync skipped for", account.username, err);
+    }
+  }
+  return synced;
 }
 
 async function fetchDoctorProfiles(): Promise<Map<string, { specialty?: string; experience?: string; bio?: string }>> {
@@ -352,17 +405,24 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
     throw new Error("Failed to update staff account in the database.");
   }
 
-  // Prefer Express response — do not re-read stale Supabase anon cache
+  // Prefer Express response — public page reads the same doctors table
   const verified = updated;
 
   if (role === "doctor") {
+    const savedSpecialty = verified.specialty || data.specialty;
+    const savedBio = verified.bio || data.bio;
+    if (!savedSpecialty || !savedBio) {
+      throw new Error(
+        "Doctor login updated, but public profile (specialty/bio) was not saved. Retry Save Changes."
+      );
+    }
     if (previousUsername && previousUsername !== cleanUsername) {
       removeDoctorMetadata(previousUsername);
     }
     setDoctorMetadata(cleanUsername, {
-      specialty: data.specialty || verified.specialty,
+      specialty: savedSpecialty,
       experience: data.experience || verified.experience,
-      bio: data.bio || verified.bio,
+      bio: savedBio,
     });
   }
 

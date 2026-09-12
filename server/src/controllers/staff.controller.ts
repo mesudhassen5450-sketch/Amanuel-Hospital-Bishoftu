@@ -4,6 +4,7 @@ import { hashPassword } from '../utils/auth.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 import { deleteLinkedDoctorProfile, resolveStaffAccount } from '../utils/staffAccount.js';
 import { isEffectivelyOnline } from '../utils/onlineStatus.js';
+import { loadDoctorProfileMap, upsertDoctorProfile } from '../utils/doctorProfile.js';
 
 /**
  * GET /api/staff
@@ -29,30 +30,8 @@ export const getAllStaffAccounts = async (req: AuthRequest, res: Response) => {
             },
         });
 
-        // Attach doctor profile fields from the same Prisma DB (not Supabase anon)
-        let profileMap = new Map<string, any>();
-        try {
-            const doctorUsernames = staffAccounts
-                .filter((s) => String(s.role || '').toLowerCase() === 'doctor')
-                .map((s) => s.username);
-            if (doctorUsernames.length > 0) {
-                const profiles = await prisma.doctor.findMany({
-                    where: { username: { in: doctorUsernames } },
-                    select: {
-                        username: true,
-                        specialty: true,
-                        experience: true,
-                        experienceYears: true,
-                        bio: true,
-                    },
-                });
-                profileMap = new Map(
-                    profiles.map((p) => [p.username.toLowerCase(), p])
-                );
-            }
-        } catch (profileErr: any) {
-            console.warn('[Staff Controller] Doctor profile join skipped:', profileErr.message);
-        }
+        // Attach doctor profiles (case-insensitive username match)
+        const profileMap = await loadDoctorProfileMap(prisma);
 
         const nowMs = Date.now();
         const staleOnlineIds: bigint[] = [];
@@ -179,62 +158,27 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
         // Doctor accounts MUST also get a doctors row in the same DB (public page + admin bio)
         let doctorProfile: {
             specialty?: string;
-            experience?: string;
+            experience?: string | null;
             experienceYears?: number | null;
-            bio?: string;
+            bio?: string | null;
         } | null = null;
 
         if (formattedRole === 'doctor') {
-            const specialty = req.body.specialty || req.body.specialization || 'General Practice';
-            const experienceYears =
-                req.body.experienceYears != null
-                    ? Number(req.body.experienceYears)
-                    : req.body.experience_years != null
-                      ? Number(req.body.experience_years)
-                      : null;
-            const experience =
-                req.body.experience
-                    ? String(req.body.experience)
-                    : experienceYears
-                      ? `${experienceYears}+ years experience`
-                      : '5+ years experience';
-            const bio = req.body.bio || `Specialist physician at Dr. Amanuel Hospital.`;
-
             try {
-                const upsertedDoctor = await prisma.doctor.upsert({
-                    where: { username: newStaff.username },
-                    update: {
-                        specialty,
-                        experience,
-                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
-                        bio,
-                    },
-                    create: {
-                        username: newStaff.username,
-                        specialty,
-                        experience,
-                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
-                        bio,
-                        isAvailable: true,
-                    },
-                    select: {
-                        specialty: true,
-                        experience: true,
-                        experienceYears: true,
-                        bio: true,
-                    },
+                doctorProfile = await upsertDoctorProfile(prisma, newStaff.username, {
+                    specialty: req.body.specialty || req.body.specialization,
+                    experience: req.body.experience,
+                    experienceYears:
+                        req.body.experienceYears != null
+                            ? Number(req.body.experienceYears)
+                            : req.body.experience_years != null
+                              ? Number(req.body.experience_years)
+                              : null,
+                    bio: req.body.bio,
                 });
-                // Prisma nullable fields are `string | null`; normalize to `string | undefined`
-                doctorProfile = {
-                    specialty: upsertedDoctor.specialty,
-                    experience: upsertedDoctor.experience ?? undefined,
-                    experienceYears: upsertedDoctor.experienceYears ?? null,
-                    bio: upsertedDoctor.bio ?? undefined,
-                };
                 console.log('[Staff Controller] Doctor profile created/updated for staff:', newStaff.username);
             } catch (docError: any) {
                 console.error('[Staff Controller] Doctor record creation failed:', docError.message);
-                // Roll back orphan login account so Admin never shows success without a public doctor
                 try {
                     await prisma.staffAccount.delete({ where: { id: newStaff.id } });
                 } catch (rollbackErr: any) {
@@ -383,57 +327,24 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
 
         let doctorProfile: {
             specialty?: string;
-            experience?: string;
+            experience?: string | null;
             experienceYears?: number | null;
-            bio?: string;
+            bio?: string | null;
         } | null = null;
 
         if (formattedRole === 'doctor') {
             try {
-                const experienceYears =
-                    req.body.experienceYears != null
-                        ? Number(req.body.experienceYears)
-                        : req.body.experience_years != null
-                          ? Number(req.body.experience_years)
-                          : null;
-                const upsertedDoctor = await prisma.doctor.upsert({
-                    where: { username: updatedStaff.username },
-                    update: {
-                        specialty: specialty || 'General Practice',
-                        experience: experience
-                            ? String(experience)
-                            : experienceYears
-                              ? `${experienceYears}+ years experience`
-                              : undefined,
-                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
-                        bio: bio || undefined,
-                    },
-                    create: {
-                        username: updatedStaff.username,
-                        specialty: specialty || 'General Practice',
-                        experience: experience
-                            ? String(experience)
-                            : experienceYears
-                              ? `${experienceYears}+ years experience`
-                              : '5+ years experience',
-                        experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
-                        bio: bio || `Specialist physician at Dr. Amanuel Hospital.`,
-                        isAvailable: true,
-                    },
-                    select: {
-                        specialty: true,
-                        experience: true,
-                        experienceYears: true,
-                        bio: true,
-                    },
+                doctorProfile = await upsertDoctorProfile(prisma, updatedStaff.username, {
+                    specialty,
+                    experience,
+                    experienceYears:
+                        req.body.experienceYears != null
+                            ? Number(req.body.experienceYears)
+                            : req.body.experience_years != null
+                              ? Number(req.body.experience_years)
+                              : null,
+                    bio,
                 });
-                // Prisma nullable fields are `string | null`; normalize to `string | undefined`
-                doctorProfile = {
-                    specialty: upsertedDoctor.specialty,
-                    experience: upsertedDoctor.experience ?? undefined,
-                    experienceYears: upsertedDoctor.experienceYears ?? null,
-                    bio: upsertedDoctor.bio ?? undefined,
-                };
             } catch (docErr: any) {
                 console.error('[Staff Controller] Doctor profile update failed:', docErr.message);
                 return res.status(500).json({
