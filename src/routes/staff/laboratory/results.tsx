@@ -2,11 +2,13 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { StaffGuard } from "@/components/staff/StaffGuard";
 import { StaffLayout } from "@/components/staff/StaffLayout";
-import { getAllLabResults } from "@/lib/staff-server";
+import { useStaffAuth } from "@/lib/staff-auth";
+import { getAllLabResults, deleteLabResult } from "@/lib/staff-server";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Loader2, TestTube, Search, RefreshCcw } from "lucide-react";
+import { Loader2, TestTube, Search, RefreshCcw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/staff/laboratory/results")({
   head: () => ({ meta: [{ title: "Lab Results — Dr. Amanuel Hospital" }] }),
@@ -14,10 +16,12 @@ export const Route = createFileRoute("/staff/laboratory/results")({
 });
 
 function LabResultsPage() {
+  const { user } = useStaffAuth();
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [query, setQuery]     = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const load = async () => {
     setLoading(true);
@@ -27,6 +31,19 @@ function LabResultsPage() {
   };
 
   useEffect(() => { load(); }, [refreshKey]);
+
+  const handleDelete = async (id: number) => {
+    setDeletingId(id);
+    try {
+      await deleteLabResult({ data: { id, callerRole: user?.role ?? undefined } });
+      setResults((prev) => prev.filter((row) => row.id !== id));
+      toast.success("Lab result deleted from the database");
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete lab result");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const filtered = results.filter(r => {
     const q = query.toLowerCase();
@@ -82,10 +99,20 @@ function LabResultsPage() {
                         {r.patients?.mrn && <span className="ml-2 font-mono text-primary">{r.patients.mrn}</span>}
                       </p>
                     </div>
-                    <div className="text-right">
+                    <div className="text-right space-y-2">
                       <p className="text-xs text-muted-foreground">Completed</p>
                       <p className="text-xs font-medium">{new Date(r.created_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}</p>
                       <p className="text-xs text-muted-foreground mt-0.5">Tech: {r.technician_id}</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs rounded-lg border-destructive/30 text-destructive hover:bg-destructive/5 gap-1"
+                        disabled={deletingId === r.id}
+                        onClick={() => handleDelete(r.id)}
+                      >
+                        {deletingId === r.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        Delete
+                      </Button>
                     </div>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-secondary/20 rounded-xl p-4">

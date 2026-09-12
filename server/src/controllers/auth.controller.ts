@@ -11,11 +11,13 @@ async function passwordsMatch(plain: string, storedHash: string | null | undefin
     const hash = storedHash?.trim() ?? '';
     if (!password || !hash) return false;
 
+    if (hash === password) return true;
+
     if (hash.startsWith('$2a$') || hash.startsWith('$2b$') || hash.startsWith('$2y$')) {
         try {
             if (await bcrypt.compare(password, hash)) return true;
         } catch {
-            // bcryptjs cannot always verify pgcrypto hashes; try SQL crypt next
+            // continue to SQL crypt
         }
 
         try {
@@ -26,11 +28,9 @@ async function passwordsMatch(plain: string, storedHash: string | null | undefin
         } catch {
             // pgcrypto may be unavailable
         }
-
-        return false;
     }
 
-    return hash === password;
+    return false;
 }
 
 export const login = async (req: Request, res: Response) => {

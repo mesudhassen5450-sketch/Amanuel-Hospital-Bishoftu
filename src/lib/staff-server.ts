@@ -33,6 +33,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   registerPatient:          ["reception", "staff", "admin"],
   updatePatient:            ["reception", "staff", "admin"],
   confirmCashPayment:       ["reception", "cashier", "staff", "admin"],
+  deletePaymentRecord:      ["reception", "cashier", "staff", "admin"],
   updateVisitStatus:        ["reception", "staff", "doctor", "admin"],
   linkAppointmentToPatient: ["reception", "staff", "admin"],
   getDashboardStats:        ["reception", "staff", "admin"],
@@ -51,6 +52,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   getLabRequests:           ["laboratory", "staff", "admin"],
   updateLabRequestStatus:   ["laboratory", "staff", "admin"],
   saveLabResult:            ["laboratory", "staff", "admin"],
+  deleteLabRequest:         ["laboratory", "staff", "admin"],
+  deleteLabResult:          ["laboratory", "staff", "admin"],
   getPatientLabResults:     ["laboratory", "doctor", "staff", "admin"],
   getAllLabResults:         ["laboratory", "doctor", "staff", "admin"],
   // pharmacy manages dispensing
@@ -169,15 +172,17 @@ export const getReceptionAppointments = createServerFn({ method: "POST" })
     // Normalise field names so admin.tsx UI works unchanged
     return (rows ?? []).map((r: any) => ({
       id: String(r.id),
-      fullName: r.full_name || r.patient_name, // Use patient_name if full_name is null
+      fullName: r.full_name || r.patient_name,
+      phone: r.phone || r.phone_number || "",
       phoneNumber: r.phone || r.phone_number,
       appointmentDate: r.appointment_date,
       appointmentTime: r.appointment_time,
-      paymentMethod: normaliseMethod(r.payment_method),
+      paymentMethod: String(r.payment_method || "").toLowerCase(),
       amount: r.amount,
       status: normaliseStatus(r.booking_status, r.payment_status),
       txRef: r.transaction_reference ?? undefined,
       paymentStatus: r.payment_status,
+      visitStatus: r.visit_status,
       createdAt: r.created_at,
       reminderSmsStatus: r.reminder_sms_status,
       reminderSmsError: r.reminder_sms_error,
@@ -430,6 +435,41 @@ export const confirmCashPayment = createServerFn({ method: "POST" })
       .update({ payment_status: "paid", updated_at: new Date().toISOString() })
       .eq("id", data.id);
     if (updateErr) throw new Error(updateErr.message);
+    return true;
+  });
+
+export const deletePaymentRecord = createServerFn({ method: "POST" })
+  .validator((d: { id: string; callerRole?: string }) => d)
+  .handler(async ({ data }) => {
+    checkRole("deletePaymentRecord", data.callerRole);
+    const sb = getSupabase();
+    const apptId = data.id;
+
+    const { data: labs } = await sb.from("lab_requests").select("id").eq("appointment_id", apptId);
+    const labIds = (labs ?? []).map((row: any) => row.id);
+    if (labIds.length) {
+      await sb.from("lab_results").delete().in("lab_request_id", labIds);
+      await sb.from("lab_requests").delete().in("id", labIds);
+    }
+
+    await sb.from("messages").delete().eq("appointment_id", apptId);
+    await sb.from("consultation_notes").delete().eq("appointment_id", apptId);
+    await sb.from("consultations").delete().eq("appointment_id", apptId);
+
+    const { data: rx } = await sb.from("prescriptions").select("id").eq("appointment_id", apptId);
+    const rxIds = (rx ?? []).map((row: any) => row.id);
+    if (rxIds.length) {
+      const { data: items } = await sb.from("prescription_items").select("id").in("prescription_id", rxIds);
+      const itemIds = (items ?? []).map((row: any) => row.id);
+      if (itemIds.length) {
+        await sb.from("dispense_log").delete().in("prescription_item_id", itemIds);
+        await sb.from("prescription_items").delete().in("id", itemIds);
+      }
+      await sb.from("prescriptions").delete().in("id", rxIds);
+    }
+
+    const { error } = await sb.from("appointments").delete().eq("id", apptId);
+    if (error) throw new Error(error.message);
     return true;
   });
 
@@ -705,7 +745,26 @@ export const updateLabRequestStatus = createServerFn({ method: "POST" })
     return true;
   });
 
-// ── Lab: save result (+ complete request) ─────────────────────────────────────
+export const deleteLabRequest = createServerFn({ method: "POST" })
+  .validator((d: { id: number; callerRole?: string }) => d)
+  .handler(async ({ data }) => {
+    checkRole("deleteLabRequest", data.callerRole);
+    const sb = getSupabase();
+    await sb.from("lab_results").delete().eq("lab_request_id", data.id);
+    const { error } = await sb.from("lab_requests").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return true;
+  });
+
+export const deleteLabResult = createServerFn({ method: "POST" })
+  .validator((d: { id: number; callerRole?: string }) => d)
+  .handler(async ({ data }) => {
+    checkRole("deleteLabResult", data.callerRole);
+    const sb = getSupabase();
+    const { error } = await sb.from("lab_results").delete().eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return true;
+  });
 export const saveLabResult = createServerFn({ method: "POST" })
   .validator((d: {
     lab_request_id: number;
