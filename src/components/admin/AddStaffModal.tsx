@@ -41,7 +41,8 @@ const SELECT_CLASS =
 interface AddStaffModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: () => void;
+  /** Created account so Admin can show it immediately */
+  onSuccess: (account?: StaffAPI.StaffAccount) => void;
 }
 
 const EMPTY_FORM = {
@@ -80,7 +81,7 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
         ? formData.customSpecialty.trim() || "General Practice"
         : formData.specialty;
       
-      await StaffAPI.createStaffAccount({
+      const created = await StaffAPI.createStaffAccount({
         username: formData.username.trim(),
         password: formData.password,
         role: formData.role,
@@ -90,9 +91,13 @@ export function AddStaffModal({ isOpen, onClose, onSuccess }: AddStaffModalProps
         experienceYears: isDoctor ? formData.experienceYears : undefined,
         bio: isDoctor ? formData.bio : undefined,
       });
-      toast.success("Staff account created successfully");
+      toast.success(
+        isDoctor
+          ? "Doctor account created — login + public profile saved"
+          : "Staff account created successfully"
+      );
       setFormData({ ...EMPTY_FORM });
-      onSuccess();
+      onSuccess(created);
       onClose();
     } catch (error: any) {
       toast.error(error?.message || "Failed to create staff account");

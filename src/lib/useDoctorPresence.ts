@@ -27,127 +27,40 @@ export function useDoctorsPresence() {
     try {
       setLoading(true);
 
-      // Prefer Express public doctors API (same source as admin staff creates)
-      try {
-        const response = await apiFetch("/api/doctors", { method: "GET" });
-        const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
-        if (Array.isArray(result.doctors) && result.doctors.length >= 0) {
-          const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
-          setDoctorsList(
-            (result.doctors || []).map((doc: any, i: number) => ({
+      // Express ONLY — same staff_accounts + doctors DB that Admin create writes.
+      // Never prefer Supabase anon staff_accounts (bio-only rows hid new doctors).
+      const response = await apiFetch("/api/doctors", { method: "GET" });
+      const result = await handleApiResponse<{ success: boolean; doctors: any[] }>(response);
+      const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
+      setDoctorsList(
+        (result.doctors || [])
+          .filter(
+            (doc: any) =>
+              doc?.username &&
+              doc.username !== "[DELETED]" &&
+              !isStaffDeletedLocally(doc.id, doc.username)
+          )
+          .map((doc: any, i: number) => {
+            const displayName =
+              doc.name || doc.displayName || doc.display_name || doc.username;
+            return {
               ...doc,
               photo: doc.photo || photos[i % photos.length],
               id: doc.id,
               username: doc.username,
-              displayName: doc.displayName || doc.display_name || doc.username,
+              name: displayName,
+              displayName,
               specialty: doc.specialty || "General Practice",
               experience: doc.experience || "5+ years experience",
+              bio: doc.bio || "",
               isOnline: Boolean(doc.isOnline ?? doc.is_online),
               isActive: doc.isActive !== false && doc.is_active !== false,
-            }))
-          );
-          return;
-        }
-      } catch (apiErr) {
-        console.warn("[Doctors] Express /api/doctors unavailable, trying Supabase:", apiErr);
-      }
-
-      // If Supabase is not configured, stop here
-      if (!isSupabaseConfigured) {
-        setDoctorsList([]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("staff_accounts")
-        .select("id, display_name, username, role, is_active, is_online, last_seen")
-        .eq("is_active", true)
-        .order("created_at", { ascending: true });
-
-      let staffRows: any[] = data || [];
-      if (error) {
-        console.error("[Doctors] Supabase error:", error);
-        setDoctorsList([]);
-        return;
-      }
-
-      staffRows = staffRows.filter(
-        (doc: any) =>
-          normalizeStaffRole(doc.role) === "doctor" &&
-          doc.role?.toUpperCase() !== "DELETED" &&
-          doc.username !== "[DELETED]" &&
-          !isStaffDeletedLocally(doc.id, doc.username)
+              isAvailable: doc.isAvailable !== false && doc.is_available !== false,
+            };
+          })
       );
-
-      const { data: profiles, error: profilesError } = await supabase
-        .from("doctors")
-        .select(
-          "username, specialty, experience_years, consultation_fee, rating, status, bio, is_available"
-        );
-
-      if (profilesError) {
-        // Likely the new columns don't exist yet (migration pending).
-        // Log a clear message and fall back to the base columns only.
-        console.warn(
-          "[Doctors] doctors table query failed — new columns may not be migrated yet.\n" +
-            "Run supabase/migrations/add_doctor_profile_columns.sql in your Supabase SQL Editor.\n" +
-            "Error:", profilesError.message
-        );
-      }
-
-      // If the extended query failed, retry with only the columns that have always existed
-      let resolvedProfiles = profiles;
-      if (profilesError || !profiles) {
-        const { data: fallbackProfiles } = await supabase
-          .from("doctors")
-          .select("username, specialty, experience, bio, is_available");
-        resolvedProfiles = fallbackProfiles;
-      }
-
-      const profileMap = new Map(
-        (resolvedProfiles || []).map((p: any) => [String(p.username || "").toLowerCase(), p])
-      );
-
-      const photos = ["/doctor1.jpg", "/doctor2.jpg", "/doctor3.jpg"];
-      const doctorsFromDB = staffRows.map((doc: any, i: number) => {
-        const profile = profileMap.get(String(doc.username || "").toLowerCase());
-        const meta = getDoctorMetadata(doc.username);
-
-        // Prefer experience_years (numeric) from DB; fall back to legacy string or metadata
-        const rawExpYears = profile?.experience_years;
-        const rawExpLegacy = meta?.experience;
-        let expVal: string;
-        if (rawExpYears != null) {
-          expVal = `${rawExpYears}+ years experience`;
-        } else if (rawExpLegacy) {
-          expVal = String(rawExpLegacy).trim();
-          if (expVal && !expVal.toLowerCase().includes("year")) {
-            expVal = `${expVal} years experience`;
-          }
-        } else {
-          expVal = "5+ years experience";
-        }
-
-        return {
-          id: doc.id.toString(),
-          username: doc.username,
-          name: doc.display_name || doc.username,
-          specialty: profile?.specialty || meta?.specialty || "General Practice",
-          experienceYears: rawExpYears ?? null,
-          experience: expVal,
-          consultationFee: profile?.consultation_fee ?? null,
-          rating: profile?.rating ?? null,
-          status: profile?.status ?? null,
-          bio: profile?.bio || meta?.bio || "",
-          isOnline: Boolean(doc.is_online),
-          isAvailable: profile?.is_available ?? true,
-          photo: photos[i % photos.length],
-          lastSeen: doc.last_seen,
-        };
-      });
-      setDoctorsList(doctorsFromDB);
     } catch (err) {
-      console.error("[Doctors] Fetch error:", err);
+      console.error("[Doctors] Express /api/doctors fetch error:", err);
       setDoctorsList([]);
     } finally {
       setLoading(false);

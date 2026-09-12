@@ -28,11 +28,42 @@ export const getAllStaffAccounts = async (req: AuthRequest, res: Response) => {
             },
         });
 
-        // Convert BigInt IDs to strings for JSON serialization
-        const serializedStaff = staffAccounts.map(staff => ({
-            ...staff,
-            id: staff.id.toString(),
-        }));
+        // Attach doctor profile fields from the same Prisma DB (not Supabase anon)
+        let profileMap = new Map<string, any>();
+        try {
+            const doctorUsernames = staffAccounts
+                .filter((s) => String(s.role || '').toLowerCase() === 'doctor')
+                .map((s) => s.username);
+            if (doctorUsernames.length > 0) {
+                const profiles = await prisma.doctor.findMany({
+                    where: { username: { in: doctorUsernames } },
+                    select: {
+                        username: true,
+                        specialty: true,
+                        experience: true,
+                        experienceYears: true,
+                        bio: true,
+                    },
+                });
+                profileMap = new Map(
+                    profiles.map((p) => [p.username.toLowerCase(), p])
+                );
+            }
+        } catch (profileErr: any) {
+            console.warn('[Staff Controller] Doctor profile join skipped:', profileErr.message);
+        }
+
+        const serializedStaff = staffAccounts.map((staff) => {
+            const profile = profileMap.get(staff.username.toLowerCase());
+            return {
+                ...staff,
+                id: staff.id.toString(),
+                specialty: profile?.specialty,
+                experience: profile?.experience,
+                experienceYears: profile?.experienceYears ?? null,
+                bio: profile?.bio,
+            };
+        });
 
         return res.json({
             success: true,
@@ -124,25 +155,32 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
             },
         });
 
-        // If role is doctor, attempt to create linked doctor record safely
-        if (formattedRole === 'doctor') {
-            try {
-                const specialty = req.body.specialty || req.body.specialization || 'General Practice';
-                const experienceYears =
-                    req.body.experienceYears != null
-                        ? Number(req.body.experienceYears)
-                        : req.body.experience_years != null
-                          ? Number(req.body.experience_years)
-                          : null;
-                const experience =
-                    req.body.experience
-                        ? String(req.body.experience)
-                        : experienceYears
-                          ? `${experienceYears}+ years`
-                          : '5+ years';
-                const bio = req.body.bio || `Specialist physician at Dr. Amanuel Hospital.`;
+        // Doctor accounts MUST also get a doctors row in the same DB (public page + admin bio)
+        let doctorProfile: {
+            specialty?: string;
+            experience?: string;
+            experienceYears?: number | null;
+            bio?: string;
+        } | null = null;
 
-                await prisma.doctor.upsert({
+        if (formattedRole === 'doctor') {
+            const specialty = req.body.specialty || req.body.specialization || 'General Practice';
+            const experienceYears =
+                req.body.experienceYears != null
+                    ? Number(req.body.experienceYears)
+                    : req.body.experience_years != null
+                      ? Number(req.body.experience_years)
+                      : null;
+            const experience =
+                req.body.experience
+                    ? String(req.body.experience)
+                    : experienceYears
+                      ? `${experienceYears}+ years experience`
+                      : '5+ years experience';
+            const bio = req.body.bio || `Specialist physician at Dr. Amanuel Hospital.`;
+
+            try {
+                doctorProfile = await prisma.doctor.upsert({
                     where: { username: newStaff.username },
                     update: {
                         specialty,
@@ -158,10 +196,28 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
                         bio,
                         isAvailable: true,
                     },
+                    select: {
+                        specialty: true,
+                        experience: true,
+                        experienceYears: true,
+                        bio: true,
+                    },
                 });
                 console.log('[Staff Controller] Doctor profile created/updated for staff:', newStaff.username);
             } catch (docError: any) {
-                console.warn('[Staff Controller] Doctor record creation error:', docError.message);
+                console.error('[Staff Controller] Doctor record creation failed:', docError.message);
+                // Roll back orphan login account so Admin never shows success without a public doctor
+                try {
+                    await prisma.staffAccount.delete({ where: { id: newStaff.id } });
+                } catch (rollbackErr: any) {
+                    console.error('[Staff Controller] Rollback staff after doctor failure:', rollbackErr.message);
+                }
+                return res.status(500).json({
+                    success: false,
+                    error:
+                        docError.message ||
+                        'Staff login was created but doctor profile failed. Nothing was kept — retry create.',
+                });
             }
         }
 
@@ -170,6 +226,10 @@ export const createStaffAccount = async (req: AuthRequest, res: Response) => {
             data: {
                 ...newStaff,
                 id: newStaff.id.toString(),
+                specialty: doctorProfile?.specialty,
+                experience: doctorProfile?.experience,
+                experienceYears: doctorProfile?.experienceYears ?? null,
+                bio: doctorProfile?.bio,
             },
             message: 'Staff account created successfully',
         });
@@ -293,7 +353,13 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
             }
         }
 
-        // Update or create Doctor profile if role is doctor
+        let doctorProfile: {
+            specialty?: string;
+            experience?: string;
+            experienceYears?: number | null;
+            bio?: string;
+        } | null = null;
+
         if (formattedRole === 'doctor') {
             try {
                 const experienceYears =
@@ -302,14 +368,14 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
                         : req.body.experience_years != null
                           ? Number(req.body.experience_years)
                           : null;
-                await prisma.doctor.upsert({
+                doctorProfile = await prisma.doctor.upsert({
                     where: { username: updatedStaff.username },
                     update: {
                         specialty: specialty || 'General Practice',
                         experience: experience
                             ? String(experience)
                             : experienceYears
-                              ? `${experienceYears}+ years`
+                              ? `${experienceYears}+ years experience`
                               : undefined,
                         experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
                         bio: bio || undefined,
@@ -320,15 +386,25 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
                         experience: experience
                             ? String(experience)
                             : experienceYears
-                              ? `${experienceYears}+ years`
-                              : '5+ years',
+                              ? `${experienceYears}+ years experience`
+                              : '5+ years experience',
                         experienceYears: Number.isFinite(experienceYears) ? experienceYears : undefined,
                         bio: bio || `Specialist physician at Dr. Amanuel Hospital.`,
                         isAvailable: true,
                     },
+                    select: {
+                        specialty: true,
+                        experience: true,
+                        experienceYears: true,
+                        bio: true,
+                    },
                 });
             } catch (docErr: any) {
-                console.warn('[Staff Controller] Doctor profile update notice:', docErr.message);
+                console.error('[Staff Controller] Doctor profile update failed:', docErr.message);
+                return res.status(500).json({
+                    success: false,
+                    error: docErr.message || 'Staff updated but doctor profile failed. Retry the update.',
+                });
             }
         }
 
@@ -337,6 +413,10 @@ export const updateStaffAccount = async (req: AuthRequest, res: Response) => {
             data: {
                 ...updatedStaff,
                 id: updatedStaff.id.toString(),
+                specialty: doctorProfile?.specialty,
+                experience: doctorProfile?.experience,
+                experienceYears: doctorProfile?.experienceYears ?? null,
+                bio: doctorProfile?.bio,
             },
             message: 'Staff account updated successfully',
         });

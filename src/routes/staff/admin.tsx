@@ -86,6 +86,7 @@ type StaffAccount = {
   updatedAt: string;
   specialty?: string;
   experience?: string;
+  experienceYears?: number | null;
   bio?: string;
 };
 
@@ -1206,7 +1207,20 @@ function AdminDashboardPage() {
         <AddStaffModal
           isOpen={addStaffModalOpen}
           onClose={() => setAddStaffModalOpen(false)}
-          onSuccess={fetchStaffAccounts}
+          onSuccess={(created) => {
+            if (created?.id || created?.username) {
+              setStaffAccounts((prev) => {
+                const withoutDup = (prev || []).filter(
+                  (s) =>
+                    String(s.id) !== String(created.id) &&
+                    s.username?.toLowerCase() !== created.username?.toLowerCase()
+                );
+                return [created as any, ...withoutDup];
+              });
+            }
+            // Hard refresh from Express so list matches login DB
+            void fetchStaffAccounts();
+          }}
         />
       </StaffLayout>
     </StaffGuard>

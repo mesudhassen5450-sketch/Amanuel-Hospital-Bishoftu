@@ -10,6 +10,9 @@ import {
   removeDoctorMetadata,
 } from "../doctor-metadata";
 
+/** Bump when admin staff sync changes — search for this in the deployed JS bundle. */
+export const STAFF_API_SYNC_VERSION = "express-only-staff-v4-final";
+
 export interface StaffAccount {
   id: string | number;
   username: string;
@@ -81,7 +84,10 @@ function parseRpcPayload(result: unknown): { success?: boolean; data?: any; erro
   return result as any;
 }
 
-function mapStaffRow(account: any, profile?: { specialty?: string; experience?: string; bio?: string }): StaffAccount {
+function mapStaffRow(
+  account: any,
+  profile?: { specialty?: string; experience?: string; experienceYears?: number | null; bio?: string }
+): StaffAccount {
   const username = account.username || account.userName;
   const role = account.role;
   const meta = getDoctorMetadata(username);
@@ -174,48 +180,36 @@ async function fetchStaffByUsername(username: string): Promise<any | null> {
 
 /**
  * GET /api/staff
- * Fetch all staff accounts (Express/Prisma first — same DB login uses).
- * Supabase anon reads are RLS-limited and can hide admin creates/updates.
+ * Express/Prisma ONLY — same DB as login and create.
+ * Never fall back to Supabase anon (RLS hides Express-created rows and makes
+ * Admin look like create "succeeded" with no list change).
  */
 export const getAllStaffAccounts = async (): Promise<StaffAccount[]> => {
-  let rows: any[] | null = null;
+  const response = await apiFetch("/api/staff", { method: "GET" });
+  const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(
+    response
+  );
 
-  // 1) Express first so Admin UI matches login/create/update
-  try {
-    const response = await apiFetch("/api/staff", { method: "GET" });
-    const result = await handleApiResponse<{ success: boolean; staff: StaffAccount[]; count: number }>(response);
-    if (Array.isArray(result.staff)) {
-      rows = result.staff;
-    }
-  } catch (apiErr) {
-    console.warn("[Staff API] Express getAllStaff failed, trying Supabase:", apiErr);
+  if (!Array.isArray(result.staff)) {
+    throw new Error("Staff list response was invalid. Sign in as admin again, then refresh.");
   }
 
-  // 2) Supabase fallback only if Express is unreachable
-  if (!rows) {
-    const { data, error } = await supabase
-      .from("staff_accounts")
-      .select("id, username, role, display_name, is_active, is_online, last_seen, created_at, updated_at")
-      .order("created_at", { ascending: true });
-
-    if (!error && data) {
-      rows = data;
-    } else {
-      console.error("[Staff API] Supabase fetch error:", error);
-      return [];
-    }
-  }
-
-  const profiles = await fetchDoctorProfiles();
-
-  return (rows || [])
+  // Profiles are already joined on the Express response (specialty/bio/experienceYears)
+  return result.staff
     .filter(
       (account: any) =>
         account.role?.toUpperCase() !== "DELETED" &&
         account.username !== "[DELETED]" &&
         !isStaffDeletedLocally(account.id, account.username)
     )
-    .map((account: any) => mapStaffRow(account, profiles.get(String(account.username || "").toLowerCase())));
+    .map((account: any) =>
+      mapStaffRow(account, {
+        specialty: account.specialty,
+        experience: account.experience,
+        experienceYears: account.experienceYears ?? account.experience_years,
+        bio: account.bio,
+      })
+    );
 };
 
 /**
@@ -277,26 +271,29 @@ export const createStaffAccount = async (data: CreateStaffData): Promise<StaffAc
     );
   }
 
-  // Prefer Express response so Admin list stays in sync even when Supabase anon RLS hides the row
-  const verified = created || (await fetchStaffByUsername(cleanUsername));
-  if (!verified || (!verified.id && !verified.username)) {
+  // Use Express response only — do not re-read Supabase (that DB view can miss Express rows)
+  if (!created.id && !created.username) {
     throw new Error(
       lastError ||
         "Staff account was not saved. Sign in as admin again, then create the account."
     );
   }
 
+  // Local cache only — doctor row is already written by Express in the login DB
   if (role === "doctor") {
-    await persistDoctorProfile(cleanUsername, {
-      specialty: data.specialty,
-      experience: data.experience,
-      experienceYears: data.experienceYears,
-      bio: data.bio,
+    setDoctorMetadata(cleanUsername, {
+      specialty: data.specialty || created.specialty,
+      experience: data.experience || created.experience,
+      bio: data.bio || created.bio,
     });
   }
 
-  const profiles = await fetchDoctorProfiles();
-  return mapStaffRow(verified, profiles.get(cleanUsername));
+  return mapStaffRow(created, {
+    specialty: data.specialty || created.specialty,
+    experience: data.experience || created.experience,
+    experienceYears: data.experienceYears ?? created.experienceYears,
+    bio: data.bio || created.bio,
+  });
 };
 
 /**
@@ -359,21 +356,22 @@ export const updateStaffAccount = async (id: string | number, data: UpdateStaffD
   const verified = updated;
 
   if (role === "doctor") {
-    // If username changed, remove old doctors profile row so public page updates
     if (previousUsername && previousUsername !== cleanUsername) {
-      await supabase.from("doctors").delete().ilike("username", previousUsername);
       removeDoctorMetadata(previousUsername);
     }
-    await persistDoctorProfile(cleanUsername, {
-      specialty: data.specialty,
-      experience: data.experience,
-      experienceYears: data.experienceYears,
-      bio: data.bio,
+    setDoctorMetadata(cleanUsername, {
+      specialty: data.specialty || verified.specialty,
+      experience: data.experience || verified.experience,
+      bio: data.bio || verified.bio,
     });
   }
 
-  const profiles = await fetchDoctorProfiles();
-  return mapStaffRow(verified, profiles.get(cleanUsername));
+  return mapStaffRow(verified, {
+    specialty: data.specialty || verified.specialty,
+    experience: data.experience || verified.experience,
+    experienceYears: data.experienceYears ?? verified.experienceYears,
+    bio: data.bio || verified.bio,
+  });
 };
 
 /**
