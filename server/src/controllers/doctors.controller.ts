@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { prisma } from '../config/db.js';
+import { isEffectivelyOnline } from '../utils/onlineStatus.js';
 
 /**
  * GET /api/doctors
@@ -59,12 +60,18 @@ export const getAllDoctors = async (req: Request, res: Response) => {
         }
 
         const profileMap = new Map(doctorProfiles.map(p => [p.username.toLowerCase(), p]));
+        const nowMs = Date.now();
+        const staleOnlineIds: bigint[] = [];
 
         // Map doctors into unified structure for frontend card grid
         const doctors = doctorStaff.map((staff, index) => {
             const photos = ['/doctor1.jpg', '/doctor2.jpg', '/doctor3.jpg'];
             const photo = photos[index % photos.length];
             const profile = profileMap.get(staff.username.toLowerCase());
+            const online = isEffectivelyOnline(staff.isOnline, staff.lastSeen, nowMs);
+            if (staff.isOnline && !online) {
+                staleOnlineIds.push(staff.id);
+            }
 
             // Resolve experience string: prefer numeric experience_years, then legacy string
             const rawExpYears = profile?.experienceYears;
@@ -93,12 +100,23 @@ export const getAllDoctors = async (req: Request, res: Response) => {
                 rating: profile?.rating != null ? Number(profile.rating) : null,
                 status: profile?.status ?? null,
                 bio: profile?.bio || 'Dedicated medical specialist at Dr. Amanuel Hospital.',
-                isOnline: Boolean(staff.isOnline),
+                isOnline: online,
                 isAvailable: profile?.isAvailable ?? true,
                 photo,
                 lastSeen: staff.lastSeen,
             };
         });
+
+        if (staleOnlineIds.length > 0) {
+            prisma.staffAccount
+                .updateMany({
+                    where: { id: { in: staleOnlineIds } },
+                    data: { isOnline: false },
+                })
+                .catch((err: any) =>
+                    console.warn('[Doctors Controller] Stale online cleanup skipped:', err?.message)
+                );
+        }
 
         return res.json({
             success: true,

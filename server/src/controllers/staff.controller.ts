@@ -3,6 +3,7 @@ import { prisma } from '../config/db.js';
 import { hashPassword } from '../utils/auth.js';
 import { AuthRequest } from '../middlewares/auth.middleware.js';
 import { deleteLinkedDoctorProfile, resolveStaffAccount } from '../utils/staffAccount.js';
+import { isEffectivelyOnline } from '../utils/onlineStatus.js';
 
 /**
  * GET /api/staff
@@ -53,17 +54,37 @@ export const getAllStaffAccounts = async (req: AuthRequest, res: Response) => {
             console.warn('[Staff Controller] Doctor profile join skipped:', profileErr.message);
         }
 
+        const nowMs = Date.now();
+        const staleOnlineIds: bigint[] = [];
+
         const serializedStaff = staffAccounts.map((staff) => {
             const profile = profileMap.get(staff.username.toLowerCase());
+            const online = isEffectivelyOnline(staff.isOnline, staff.lastSeen, nowMs);
+            if (staff.isOnline && !online) {
+                staleOnlineIds.push(staff.id);
+            }
             return {
                 ...staff,
                 id: staff.id.toString(),
+                isOnline: online,
                 specialty: profile?.specialty,
                 experience: profile?.experience,
                 experienceYears: profile?.experienceYears ?? null,
                 bio: profile?.bio,
             };
         });
+
+        // Clear sticky Online flags left behind after logout / closed tabs
+        if (staleOnlineIds.length > 0) {
+            prisma.staffAccount
+                .updateMany({
+                    where: { id: { in: staleOnlineIds } },
+                    data: { isOnline: false },
+                })
+                .catch((err: any) =>
+                    console.warn('[Staff Controller] Stale online cleanup skipped:', err?.message)
+                );
+        }
 
         return res.json({
             success: true,

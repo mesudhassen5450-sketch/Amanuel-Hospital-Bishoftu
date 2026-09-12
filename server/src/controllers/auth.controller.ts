@@ -77,9 +77,10 @@ export const login = async (req: Request, res: Response) => {
             { expiresIn: '24h' }
         );
 
+        const now = new Date();
         await prisma.staffAccount.update({
             where: { id: staff.id },
-            data: { lastLogin: new Date(), isOnline: true }
+            data: { lastLogin: now, lastSeen: now, isOnline: true }
         }).catch(err => console.error('Non-critical lastLogin update error:', err.message));
 
         return res.json({
@@ -95,6 +96,82 @@ export const login = async (req: Request, res: Response) => {
     } catch (error: any) {
         console.error('Login controller fatal error:', error);
         return res.status(500).json({ error: error.message || 'Internal server error during login' });
+    }
+};
+
+/**
+ * POST /api/auth/logout
+ * Mark the authenticated staff account Offline (all roles).
+ */
+export const logout = async (req: AuthRequest, res: Response) => {
+    try {
+        if (!req.user?.username && !req.user?.id) {
+            return res.status(401).json({ success: false, message: 'Not authenticated.' });
+        }
+
+        const staff = await resolveStaffAccount(prisma, {
+            id: req.user.id,
+            username: req.user.username,
+        });
+
+        if (staff) {
+            await prisma.staffAccount.update({
+                where: { id: staff.id },
+                data: { isOnline: false, lastSeen: new Date() },
+            });
+        }
+
+        return res.json({ success: true, message: 'Logged out successfully' });
+    } catch (error: any) {
+        console.error('[Auth] Logout error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to logout',
+        });
+    }
+};
+
+/**
+ * POST /api/auth/presence
+ * Heartbeat while a staff session is active — keeps isOnline=true + lastSeen fresh.
+ */
+export const updatePresence = async (req: AuthRequest, res: Response) => {
+    try {
+        if (!req.user?.username && !req.user?.id) {
+            return res.status(401).json({ success: false, message: 'Not authenticated.' });
+        }
+
+        const online =
+            req.body?.isOnline === undefined ? true : Boolean(req.body.isOnline);
+
+        const staff = await resolveStaffAccount(prisma, {
+            id: req.user.id,
+            username: req.user.username,
+        });
+
+        if (!staff) {
+            return res.status(404).json({ success: false, message: 'Staff account not found.' });
+        }
+
+        await prisma.staffAccount.update({
+            where: { id: staff.id },
+            data: {
+                isOnline: online,
+                lastSeen: new Date(),
+            },
+        });
+
+        return res.json({
+            success: true,
+            data: { isOnline: online },
+            message: online ? 'Presence set online' : 'Presence set offline',
+        });
+    } catch (error: any) {
+        console.error('[Auth] Presence update error:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to update presence',
+        });
     }
 };
 

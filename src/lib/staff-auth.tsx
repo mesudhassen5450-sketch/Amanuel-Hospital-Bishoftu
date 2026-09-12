@@ -79,9 +79,24 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser]         = useState<StaffUser | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  // Expire session and redirect
+  // Expire session and redirect — also force Offline on Express
   const expireSession = useCallback(() => {
-    localStorage.removeItem('token'); // Clear JWT token
+    const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+    if (token) {
+      // keepalive so the request can finish while the page navigates away
+      fetch(`${API_BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: '{}',
+        keepalive: true,
+      }).catch(() => {});
+    }
+    localStorage.removeItem('token');
+    localStorage.removeItem('auth_token');
     clearSession();
     setUser(null);
     window.location.replace("/staff/login");
@@ -133,39 +148,50 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     };
   }, [user, expireSession]);
 
-  // ── Heartbeat & Tab Close Handler for Doctors ─────────────────────────────
+  // ── Heartbeat & Tab Close Handler (all staff roles → Express) ─────────────
   useEffect(() => {
-    if (!user || user.role !== "doctor") return;
+    if (!user) return;
 
-    // Heartbeat every 30 seconds to keep doctor online
-    const heartbeatInterval = setInterval(async () => {
-      try {
-        const { updateDoctorOnlineStatus } = await import("./staff-server");
-        await updateDoctorOnlineStatus({
-          data: { username: user.username, isOnline: true, callerRole: user.role || undefined },
-        });
-      } catch (err) {
-        console.error("Heartbeat failed:", err);
-      }
-    }, 30000);
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-    // Set offline on tab close
-    const handleUnload = async () => {
-      try {
-        const { updateDoctorOnlineStatus } = await import("./staff-server");
-        await updateDoctorOnlineStatus({
-          data: { username: user.username, isOnline: false, callerRole: user.role || undefined },
-        });
-      } catch (err) {
-        console.error("Failed to set offline on tab close:", err);
-      }
+    const postPresence = (isOnline: boolean, keepalive = false) => {
+      const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+      if (!token) return Promise.resolve();
+      return fetch(`${API_BASE_URL}/api/auth/presence`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ isOnline }),
+        keepalive,
+      }).catch((err) => {
+        console.error('Presence update failed:', err);
+      });
     };
 
-    window.addEventListener("beforeunload", handleUnload);
+    // Immediately mark online for this session
+    void postPresence(true);
+
+    // Heartbeat every 30 seconds so Admin "Online" stays accurate
+    const heartbeatInterval = setInterval(() => {
+      void postPresence(true);
+    }, 30000);
+
+    // Set offline on tab close / refresh
+    const handleUnload = () => {
+      void postPresence(false, true);
+    };
+
+    window.addEventListener('pagehide', handleUnload);
+    window.addEventListener('beforeunload', handleUnload);
 
     return () => {
       clearInterval(heartbeatInterval);
-      window.removeEventListener("beforeunload", handleUnload);
+      window.removeEventListener('pagehide', handleUnload);
+      window.removeEventListener('beforeunload', handleUnload);
+      // Leaving the staff app (route unmount) → offline
+      void postPresence(false, true);
     };
   }, [user]);
 
@@ -203,15 +229,18 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         writeSession(session);
         setUser({ username: session.username, role: session.role, displayName: session.displayName });
 
-        if (normalizedRole === "doctor") {
-          try {
-            const { updateDoctorOnlineStatus } = await import("./staff-server");
-            await updateDoctorOnlineStatus({
-              data: { username: result.user.username, isOnline: true, callerRole: normalizedRole || undefined },
-            });
-          } catch (err) {
-            console.error("Failed to update doctor online status on login:", err);
-          }
+        // Login already sets isOnline on Express; refresh presence immediately
+        try {
+          await fetch(`${API_BASE_URL}/api/auth/presence`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${result.token}`,
+            },
+            body: JSON.stringify({ isOnline: true }),
+          });
+        } catch (err) {
+          console.error("Failed to update online status on login:", err);
         }
 
         return { success: true };
@@ -233,24 +262,30 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
 
   // ── Logout ────────────────────────────────────────────────────────────────
   const logout = async () => {
-    // Set doctor offline status if logging out as doctor
-    if (user?.role === "doctor") {
+    const token = localStorage.getItem('token') || localStorage.getItem('auth_token');
+    const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+    // Always mark Offline in Express (same DB Admin list reads) — all roles
+    if (token) {
       try {
-        const { updateDoctorOnlineStatus } = await import("./staff-server");
-        await updateDoctorOnlineStatus({
-          data: { username: user.username, isOnline: false, callerRole: user.role || undefined },
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: '{}',
+          keepalive: true,
         });
       } catch (err) {
-        console.error("Failed to update doctor online status on logout:", err);
+        console.error("Failed to set offline status on logout:", err);
       }
     }
 
-    // Clear JWT token from localStorage
     localStorage.removeItem('token');
-    
+    localStorage.removeItem('auth_token');
     clearSession();
     setUser(null);
-    // Replace history so back-button cannot return to protected page
     window.history.replaceState(null, "", "/staff/login");
     window.location.replace("/staff/login");
   };

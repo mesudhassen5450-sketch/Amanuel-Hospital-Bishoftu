@@ -127,7 +127,7 @@ function AdminDashboardPage() {
   const [formLoading, setFormLoading] = useState(false);
 
   // Fetch staff accounts
-  const fetchStaffAccounts = async () => {
+  const fetchStaffAccounts = async (opts?: { silent?: boolean }) => {
     // Only fetch if user is authenticated and has a role
     if (!user?.role) {
       console.error("User not authenticated or missing role");
@@ -135,7 +135,7 @@ function AdminDashboardPage() {
     }
 
     try {
-      setLoading(true);
+      if (!opts?.silent) setLoading(true);
       const accounts = await StaffAPI.getAllStaffAccounts();
       // Ensure we always set an array, fallback to empty array if undefined
       setStaffAccounts(Array.isArray(accounts) ? accounts : []);
@@ -145,9 +145,9 @@ function AdminDashboardPage() {
       console.error("Fetch staff accounts error:", msg);
       setErrorState(msg);
       setStaffAccounts([]); // Set empty array on error
-      toast.error(msg);
+      if (!opts?.silent) toast.error(msg);
     } finally {
-      setLoading(false);
+      if (!opts?.silent) setLoading(false);
     }
   };
 
@@ -156,6 +156,15 @@ function AdminDashboardPage() {
       fetchStaffAccounts();
     }
   }, [user]);
+
+  // Refresh Online/Offline badges while Admin stays on the page (no loading flicker)
+  useEffect(() => {
+    if (!user?.role) return;
+    const interval = setInterval(() => {
+      void fetchStaffAccounts({ silent: true });
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [user?.role]);
 
   // Stats calculations with safe navigation
   const totalStaff = staffAccounts?.length ?? 0;

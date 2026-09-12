@@ -56,6 +56,8 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   if (
     response.status === 401 &&
     !path.includes("/auth/login") &&
+    !path.includes("/auth/logout") &&
+    !path.includes("/auth/presence") &&
     !path.includes("/password") &&
     method !== "DELETE"
   ) {

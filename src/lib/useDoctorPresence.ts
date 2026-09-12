@@ -120,9 +120,9 @@ export function useDoctorsPresence() {
 
 /**
  * Hook for tracking individual doctor presence with heartbeat
- * Updates doctor status in Supabase Realtime with periodic heartbeat
+ * Updates presence through Express (same DB Admin Online/Offline reads)
  *
- * @param doctorUsername - The username of the doctor to track (string like "doctor" or "doctor2")
+ * @param doctorUsername - The username of the doctor to track
  * @param isAvailable - Whether the doctor is available for calls
  */
 export function useDoctorPresence(doctorUsername: string | undefined, isAvailable: boolean = true) {
@@ -130,68 +130,44 @@ export function useDoctorPresence(doctorUsername: string | undefined, isAvailabl
 
   useEffect(() => {
     if (!doctorUsername) return;
-    // Skip all Supabase calls when credentials are not configured
-    if (!isSupabaseConfigured) return;
+
+    const postPresence = (isOnline: boolean, keepalive = false) => {
+      return apiFetch("/api/auth/presence", {
+        method: "POST",
+        body: JSON.stringify({ isOnline }),
+        keepalive,
+      }).catch((error) => {
+        console.error("Presence update error:", error);
+      });
+    };
 
     // 1. Immediately set online state on mount
-    const setOnline = async () => {
-      try {
-        await supabase
-          .from('staff_accounts')
-          .update({ is_online: true, last_seen: new Date().toISOString() })
-          .eq('username', doctorUsername);
-        console.log(`[Doctor Presence] Doctor ${doctorUsername} set to online`);
-      } catch (error) {
-        console.error("Error setting doctor online:", error);
-      }
-    };
-
-    setOnline();
+    void postPresence(true).then(() => {
+      console.log(`[Doctor Presence] Doctor ${doctorUsername} set to online`);
+    });
 
     // 2. Heartbeat loop to keep last_seen updated (every 30 seconds)
-    const startHeartbeat = () => {
-      heartbeatIntervalRef.current = setInterval(async () => {
-        if (isAvailable) {
-          try {
-            await supabase
-              .from('staff_accounts')
-              .update({ last_seen: new Date().toISOString() })
-              .eq('username', doctorUsername);
-          } catch (error) {
-            console.error("Heartbeat error:", error);
-          }
-        }
-      }, 30000); // 30 seconds
-    };
-
-    startHeartbeat();
-
-    // 3. Mark offline on unmount / navigate away
-    const setOffline = async () => {
-      try {
-        await supabase
-          .from('staff_accounts')
-          .update({ is_online: false, last_seen: new Date().toISOString() })
-          .eq('username', doctorUsername);
-        console.log(`[Doctor Presence] Doctor ${doctorUsername} set to offline`);
-      } catch (error) {
-        console.error("Error setting doctor offline:", error);
+    heartbeatIntervalRef.current = setInterval(() => {
+      if (isAvailable) {
+        void postPresence(true);
       }
-    };
+    }, 30000);
 
-    // Handle window close
+    // 3. Mark offline on unmount / navigate away / tab close
     const handleUnload = () => {
-      setOffline();
+      void postPresence(false, true);
     };
 
-    window.addEventListener('beforeunload', handleUnload);
+    window.addEventListener("pagehide", handleUnload);
+    window.addEventListener("beforeunload", handleUnload);
 
     return () => {
       if (heartbeatIntervalRef.current) {
         clearInterval(heartbeatIntervalRef.current);
       }
-      setOffline();
-      window.removeEventListener('beforeunload', handleUnload);
+      void postPresence(false, true);
+      window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("beforeunload", handleUnload);
     };
   }, [doctorUsername, isAvailable]);
 }
