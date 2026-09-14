@@ -31,9 +31,18 @@ export function AvailableDoctorsModal({ open, onOpenChange }: AvailableDoctorsMo
   const handleCheckAvailability = (doctor: any) => {
     if (!doctor.isOnline) {
       setShowOfflineMessage(true);
+      setSelectedDoctor(doctor);
       return;
     }
-    setSelectedDoctor(doctor);
+    // Always pass username — doctor.id from /api/doctors is a numeric staff id
+    setSelectedDoctor({
+      ...doctor,
+      id: doctor.id,
+      username: doctor.username || doctor.userName || "",
+      name: doctor.name || doctor.displayName || doctor.username,
+      specialty: doctor.specialty || "General Practice",
+      consultationFee: doctor.consultationFee ?? 100,
+    });
     setPatientRequestOpen(true);
   };
 

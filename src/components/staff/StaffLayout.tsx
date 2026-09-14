@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { useTheme } from "@/lib/theme-context";
 import { useDoctorCallNotifications } from "@/lib/useDoctorCallNotifications";
 import { IncomingCallModal } from "@/components/telemedicine/IncomingCallModal";
+import { DoctorAvailabilityModal } from "@/components/telemedicine/DoctorAvailabilityModal";
 
 const RECEPTION_NAV = [
   { to: "/staff/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -67,9 +68,14 @@ export function StaffLayout({ children }: { children: ReactNode }) {
   const NAV = isAdmin ? ADMIN_NAV : isDoctor ? DOCTOR_NAV : isLab ? LABORATORY_NAV : isPharmacy ? PHARMACY_NAV : isCashier ? CASHIER_NAV : RECEPTION_NAV;
   const portalLabel = isAdmin ? "Admin Portal" : isDoctor ? "Doctor Portal" : isLab ? "Lab Portal" : isPharmacy ? "Pharmacy Portal" : isCashier ? "Cashier Portal" : "Staff Portal";
 
-  // Global Doctor Call Notifications
+  // Global doctor call + consultation-request notifications (any staff page)
   const doctorUsername = isDoctor ? (user?.username || "doctor") : "";
-  const { incomingCall, closeIncomingCall } = useDoctorCallNotifications(doctorUsername);
+  const {
+    incomingCall,
+    closeIncomingCall,
+    availabilityRequest,
+    closeAvailabilityRequest,
+  } = useDoctorCallNotifications(doctorUsername);
 
   const handleLogout = async () => {
     await logout();
@@ -168,16 +174,26 @@ export function StaffLayout({ children }: { children: ReactNode }) {
         </main>
       </div>
 
-      {/* Global Doctor Incoming Call Modal */}
+      {/* Global doctor request + incoming call modals */}
       {isDoctor && (
-        <IncomingCallModal
-          open={!!incomingCall}
-          onOpenChange={(open) => {
-            if (!open) closeIncomingCall();
-          }}
-          appointment={incomingCall}
-          currentDoctorUsername={user?.username || "doctor"}
-        />
+        <>
+          <DoctorAvailabilityModal
+            open={!!availabilityRequest}
+            onOpenChange={(open) => {
+              if (!open) closeAvailabilityRequest();
+            }}
+            appointment={availabilityRequest}
+            currentDoctorUsername={user?.username || "doctor"}
+          />
+          <IncomingCallModal
+            open={!!incomingCall}
+            onOpenChange={(open) => {
+              if (!open) closeIncomingCall();
+            }}
+            appointment={incomingCall}
+            currentDoctorUsername={user?.username || "doctor"}
+          />
+        </>
       )}
     </div>
   );

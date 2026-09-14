@@ -15,6 +15,7 @@ function getSupabase() {
 export const requestVideoConsultation = createServerFn({ method: "POST" })
   .validator((d: {
     doctorId: string;
+    doctorUsername?: string;
     patientName: string;
     phoneNumber: string;
     consultationFee: number;
@@ -24,27 +25,45 @@ export const requestVideoConsultation = createServerFn({ method: "POST" })
     const sb = getSupabase();
 
     try {
+      // doctor.id from /api/doctors is a numeric staff id — resolve real login username
+      let doctorUsername = String(data.doctorUsername || "").toLowerCase().trim();
+      const doctorKey = String(doctorId || "").trim();
+
+      if (!doctorUsername || /^\d+$/.test(doctorUsername)) {
+        if (doctorKey && !/^\d+$/.test(doctorKey)) {
+          doctorUsername = doctorKey.toLowerCase();
+        } else if (doctorKey) {
+          const { data: staff } = await sb
+            .from("staff_accounts")
+            .select("username")
+            .eq("id", doctorKey)
+            .maybeSingle();
+          doctorUsername = (staff?.username || doctorKey).toLowerCase().trim();
+        }
+      }
+
+      if (!doctorUsername) {
+        throw new Error("Doctor username is required to request a consultation");
+      }
+
+      console.log(
+        `[requestVideoConsultation] doctorId=${doctorKey} resolved username=${doctorUsername}`
+      );
+
       // Insert appointment into Supabase
       // For video consultations, always set amount to 100 ETB
       const insertData: any = {
-        doctor_id: doctorId,
+        doctor_id: doctorKey || doctorUsername,
+        doctor_username: doctorUsername,
         patient_name: patientName,
         phone_number: phoneNumber,
         consultation_type: "ONLINE",
         consultation_fee: 100, // Fixed fee for video consultations
         amount: 100, // Payment amount for gateway
         payment_status: "UNPAID",
+        call_status: "REQUESTING_DOCTOR",
         created_at: new Date().toISOString(),
       };
-
-      // Only add new columns if they exist in the database
-      // This prevents errors if migration hasn't been run yet
-      try {
-        insertData.doctor_username = doctorId;
-        insertData.call_status = "REQUESTING_DOCTOR";
-      } catch (e) {
-        console.log("New columns may not exist yet, using fallback");
-      }
 
       console.log("Inserting appointment with data:", insertData);
 
@@ -59,8 +78,8 @@ export const requestVideoConsultation = createServerFn({ method: "POST" })
         throw new Error(`Failed to create appointment: ${error.message}`);
       }
 
-      // Trigger Desktop Push Notification for doctor
-      sendPushToUserIdOrRole(doctorId, "doctor", {
+      // Trigger Desktop Push Notification for doctor (by username)
+      sendPushToUserIdOrRole(doctorUsername, "doctor", {
         title: "Incoming Video Consultation",
         body: `${patientName} has requested an online video consultation.`,
         url: `/staff/doctor/dashboard`,
@@ -68,6 +87,7 @@ export const requestVideoConsultation = createServerFn({ method: "POST" })
 
       return {
         appointmentId: appointment.id,
+        doctorUsername,
         message: "Consultation request sent successfully",
       };
     } catch (error: any) {

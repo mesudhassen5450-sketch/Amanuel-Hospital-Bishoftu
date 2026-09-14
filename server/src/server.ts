@@ -178,6 +178,44 @@ io.on("connection", (socket) => {
     socket.emit("doctor-registered", { success: true, channel: roomName });
   });
 
+  // Patient → doctor availability request (pre-payment)
+  socket.on("consultation-request", (data: {
+    doctorUsername?: string;
+    doctorId?: string;
+    appointmentId?: string;
+    id?: string;
+    patientName?: string;
+    patientPhone?: string;
+    primaryComplaint?: string;
+    callStatus?: string;
+    roomId?: string;
+  }) => {
+    const docKey = (data.doctorUsername || data.doctorId || "").toLowerCase().trim();
+    const appointmentId = String(data.appointmentId || data.id || "");
+    const payload = {
+      appointmentId,
+      id: appointmentId,
+      patientName: data.patientName || "Patient",
+      patientPhone: data.patientPhone || "",
+      primaryComplaint: data.primaryComplaint || "Video Consultation Request",
+      doctorUsername: docKey,
+      callStatus: data.callStatus || "REQUESTING_DOCTOR",
+      roomId: data.roomId || `room_${appointmentId}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    console.log(`[Socket.IO] consultation-request for doctor="${docKey}" appointment=${appointmentId}`);
+
+    if (docKey) {
+      io.to(`doctor_${docKey}`).emit("consultation-request", payload);
+      const doctorSocketId = connectedDoctors.get(docKey);
+      if (doctorSocketId) {
+        io.to(doctorSocketId).emit("consultation-request", payload);
+      }
+    }
+    socket.broadcast.emit("consultation-request", payload);
+  });
+
   // Patient → doctor ringing (post-payment). This is what the doctor UI listens for.
   socket.on("incoming-call", (data: {
     doctorUsername?: string;

@@ -14,12 +14,14 @@ import { Loader2, CheckCircle, Clock, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { requestVideoConsultation } from "@/lib/telemedicine-server";
 import { supabase } from "@/lib/supabase";
+import { notifyDoctorConsultationRequest } from "@/lib/notify-doctor-call";
 
 interface PatientRequestModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   doctor: {
     id: string;
+    username?: string;
     name: string;
     specialty: string;
     consultationFee: number;
@@ -127,21 +129,50 @@ export function PatientRequestModal({ open, onOpenChange, doctor }: PatientReque
       setStatus("requesting");
       setError(null);
 
+      // doctor.id from /api/doctors is a numeric staff id — always prefer username
+      const doctorUsername = (
+        doctor.username ||
+        (doctor as any).userName ||
+        doctor.id
+      )
+        .toString()
+        .toLowerCase()
+        .trim();
+
       const result = await requestVideoConsultation({
         data: {
           doctorId: doctor.id,
+          doctorUsername,
           patientName: patientName.trim(),
           phoneNumber: phoneNumber.trim(),
           consultationFee: doctor.consultationFee,
         },
       });
 
+      const resolvedUsername = (
+        result.doctorUsername ||
+        doctorUsername
+      )
+        .toString()
+        .toLowerCase()
+        .trim();
+
       setAppointmentId(result.appointmentId);
       setStatus("waiting");
 
       // Store appointment ID and doctor username for payment success handler
       sessionStorage.setItem("appointment_id", result.appointmentId);
-      sessionStorage.setItem("doctor_username", doctor.id); // doctor.id is the username
+      sessionStorage.setItem("doctor_username", resolvedUsername);
+
+      // Immediately notify the connected doctor over Socket.IO
+      // (Supabase Realtime alone is unreliable for staff without a Supabase session)
+      void notifyDoctorConsultationRequest({
+        appointmentId: String(result.appointmentId),
+        doctorUsername: resolvedUsername,
+        patientName: patientName.trim(),
+        patientPhone: phoneNumber.trim(),
+        primaryComplaint: "Instant video consultation request",
+      });
 
     } catch (err: any) {
       setError(err?.message || "Failed to request consultation");

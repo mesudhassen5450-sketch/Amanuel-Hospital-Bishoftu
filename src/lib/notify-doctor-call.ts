@@ -1,7 +1,7 @@
 import { io } from "socket.io-client";
 import { BACKEND_URL } from "./api/socket-client";
 
-export type IncomingCallNotifyPayload = {
+export type DoctorNotifyPayload = {
   appointmentId: string;
   doctorUsername: string;
   patientName?: string;
@@ -10,34 +10,10 @@ export type IncomingCallNotifyPayload = {
   roomId?: string;
 };
 
-/**
- * Notify the target doctor that a patient is ringing after payment.
- * Waits for socket connect so the event is not dropped on cold start.
- */
-export function notifyDoctorIncomingCall(payload: IncomingCallNotifyPayload): Promise<void> {
-  const doctorUsername = String(payload.doctorUsername || "")
-    .toLowerCase()
-    .trim();
-  const appointmentId = String(payload.appointmentId || "").trim();
-  if (!appointmentId || !doctorUsername) {
-    console.warn("[notifyDoctorIncomingCall] Missing appointmentId or doctorUsername", payload);
-    return Promise.resolve();
-  }
-
-  const roomId = payload.roomId || `room_${appointmentId}`;
-  const eventPayload = {
-    appointmentId,
-    id: appointmentId,
-    doctorUsername,
-    doctorId: doctorUsername,
-    patientName: payload.patientName || "Patient",
-    patientPhone: payload.patientPhone || "",
-    primaryComplaint: payload.primaryComplaint || "Video Consultation",
-    roomId,
-    roomUrl: `/consultation/room/${appointmentId}`,
-    createdAt: new Date().toISOString(),
-  };
-
+function emitToDoctor(
+  eventName: "incoming-call" | "consultation-request" | "patient-paid",
+  payload: Record<string, unknown>
+): Promise<void> {
   return new Promise((resolve) => {
     const socket = io(BACKEND_URL, {
       autoConnect: true,
@@ -59,23 +35,13 @@ export function notifyDoctorIncomingCall(payload: IncomingCallNotifyPayload): Pr
     };
 
     const send = () => {
-      // Primary: dedicated incoming-call channel the doctor UI listens for
-      socket.emit("incoming-call", eventPayload);
-      // Also keep patient-paid for older listeners, with doctor context
-      socket.emit("patient-paid", {
-        appointmentId,
-        doctorUsername,
-        patientName: eventPayload.patientName,
-        primaryComplaint: eventPayload.primaryComplaint,
-        roomId,
-      });
+      socket.emit(eventName, payload);
       console.log(
-        "[notifyDoctorIncomingCall] Emitted incoming-call + patient-paid for",
-        doctorUsername,
-        appointmentId
+        `[notifyDoctor] Emitted ${eventName}`,
+        payload.doctorUsername,
+        payload.appointmentId
       );
-      // Give the server a brief moment to relay before tearing down
-      setTimeout(finish, 400);
+      setTimeout(finish, 500);
     };
 
     if (socket.connected) {
@@ -83,10 +49,76 @@ export function notifyDoctorIncomingCall(payload: IncomingCallNotifyPayload): Pr
     } else {
       socket.once("connect", send);
       socket.once("connect_error", (err) => {
-        console.warn("[notifyDoctorIncomingCall] connect_error:", err?.message || err);
+        console.warn(`[notifyDoctor] connect_error (${eventName}):`, err?.message || err);
         finish();
       });
       setTimeout(finish, 13000);
     }
+  });
+}
+
+/**
+ * Pre-payment: tell the doctor a patient is requesting availability.
+ */
+export async function notifyDoctorConsultationRequest(
+  payload: DoctorNotifyPayload
+): Promise<void> {
+  const doctorUsername = String(payload.doctorUsername || "").toLowerCase().trim();
+  const appointmentId = String(payload.appointmentId || "").trim();
+  if (!appointmentId || !doctorUsername) {
+    console.warn("[notifyDoctorConsultationRequest] Missing fields", payload);
+    return;
+  }
+
+  const eventPayload = {
+    appointmentId,
+    id: appointmentId,
+    doctorUsername,
+    doctorId: doctorUsername,
+    patientName: payload.patientName || "Patient",
+    patientPhone: payload.patientPhone || "",
+    primaryComplaint: payload.primaryComplaint || "Video Consultation Request",
+    callStatus: "REQUESTING_DOCTOR",
+    roomId: payload.roomId || `room_${appointmentId}`,
+    createdAt: new Date().toISOString(),
+  };
+
+  await emitToDoctor("consultation-request", eventPayload);
+  // Also emit incoming-call so any doctor UI listening for calls still wakes up
+  await emitToDoctor("incoming-call", eventPayload);
+}
+
+/**
+ * Post-payment: ring the doctor for the live video call.
+ */
+export async function notifyDoctorIncomingCall(payload: DoctorNotifyPayload): Promise<void> {
+  const doctorUsername = String(payload.doctorUsername || "").toLowerCase().trim();
+  const appointmentId = String(payload.appointmentId || "").trim();
+  if (!appointmentId || !doctorUsername) {
+    console.warn("[notifyDoctorIncomingCall] Missing appointmentId or doctorUsername", payload);
+    return;
+  }
+
+  const roomId = payload.roomId || `room_${appointmentId}`;
+  const eventPayload = {
+    appointmentId,
+    id: appointmentId,
+    doctorUsername,
+    doctorId: doctorUsername,
+    patientName: payload.patientName || "Patient",
+    patientPhone: payload.patientPhone || "",
+    primaryComplaint: payload.primaryComplaint || "Video Consultation",
+    roomId,
+    roomUrl: `/consultation/room/${appointmentId}`,
+    createdAt: new Date().toISOString(),
+  };
+
+  await emitToDoctor("incoming-call", eventPayload);
+  await emitToDoctor("patient-paid", {
+    appointmentId,
+    doctorUsername,
+    patientName: eventPayload.patientName,
+    primaryComplaint: eventPayload.primaryComplaint,
+    roomId,
   });
 }

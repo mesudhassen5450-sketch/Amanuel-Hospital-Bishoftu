@@ -49,9 +49,18 @@ function isForThisDoctor(targetRaw: string | undefined, currentDoctorUsername: s
   const target = (targetRaw || "").toLowerCase().trim();
   const me = currentDoctorUsername.toLowerCase().trim();
   if (!me) return false;
-  // Empty target = broadcast / unknown doctor field — still show to logged-in doctors
   if (!target) return true;
   return target === me || me === "doctor";
+}
+
+function isRequestingStatus(status: string): boolean {
+  const s = status.toUpperCase();
+  return (
+    s === "REQUESTING_DOCTOR" ||
+    s === "PENDING" ||
+    s === "WAITING" ||
+    s === "REQUESTED"
+  );
 }
 
 export function useDoctorCallNotifications(currentDoctorUsername: string) {
@@ -60,6 +69,53 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
 
   useEffect(() => {
     if (!currentDoctorUsername) return;
+    const me = currentDoctorUsername.toLowerCase().trim();
+
+    const openAvailability = (data: any) => {
+      const id = String(data.appointmentId || data.appointment_id || data.id || "");
+      if (!id) return;
+      if (!isForThisDoctor(data.doctorUsername || data.doctor_username, me)) return;
+      setAvailabilityRequest({
+        id,
+        patientName: data.patientName || data.patient_name || data.full_name || "Patient",
+        doctorUsername: data.doctorUsername || data.doctor_username || me,
+        callStatus: String(data.callStatus || data.call_status || "REQUESTING_DOCTOR"),
+      });
+    };
+
+    // Catch requests that arrived while the doctor tab was refreshing / Realtime missed INSERT
+    const loadPendingRequests = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("appointments")
+          .select(
+            "id, patient_name, full_name, doctor_username, doctor_id, call_status, status, phone, phone_number, created_at"
+          )
+          .eq("doctor_username", me)
+          .order("created_at", { ascending: false })
+          .limit(20);
+
+        if (error) {
+          console.warn("[DoctorSocket] Pending request query failed:", error.message);
+          return;
+        }
+
+        const pending = (data || []).find((appt: any) =>
+          isRequestingStatus(String(appt.call_status || appt.status || ""))
+        );
+        if (pending) {
+          console.log("[DoctorSocket] Found pending consultation request:", pending.id);
+          openAvailability(pending);
+        }
+      } catch (err) {
+        console.warn("[DoctorSocket] Pending request load error:", err);
+      }
+    };
+
+    void loadPendingRequests();
+    const pendingPoll = setInterval(() => {
+      void loadPendingRequests();
+    }, 8000);
 
     let socket: Socket | null = null;
     try {
@@ -73,9 +129,9 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
       const register = () => {
         console.log("[DoctorSocket] Connected:", BACKEND_URL, socket?.id);
         socket?.emit("register-doctor", {
-          doctorId: currentDoctorUsername,
-          username: currentDoctorUsername,
-          doctorUsername: currentDoctorUsername,
+          doctorId: me,
+          username: me,
+          doctorUsername: me,
         });
       };
 
@@ -85,28 +141,33 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
         console.warn(
           "[DoctorSocket] Connection error:",
           err?.message || err,
-          "— relying on Supabase Realtime fallback."
+          "— relying on Supabase / polling fallback."
         );
       });
 
       const handleIncomingCall = (data: any) => {
         console.log("[DoctorSocket] Incoming call event:", data);
-        if (!isForThisDoctor(data?.doctorUsername || data?.doctor_username, currentDoctorUsername)) {
+        if (!isForThisDoctor(data?.doctorUsername || data?.doctor_username, me)) return;
+
+        const callStatus = String(data?.callStatus || data?.call_status || "").toUpperCase();
+        // Pre-payment requests should open the availability modal, not the in-call ring UI
+        if (isRequestingStatus(callStatus) || callStatus === "REQUESTING_DOCTOR") {
+          openAvailability(data);
           return;
         }
-        setIncomingCall(buildIncomingCall(data, currentDoctorUsername, "RINGING"));
+        setIncomingCall(buildIncomingCall(data, me, "RINGING"));
       };
 
-      // Socket event the production patient flow emits after payment
       socket.on("incoming-call", handleIncomingCall);
+      socket.on("consultation-request", (data: any) => {
+        console.log("[DoctorSocket] consultation-request event:", data);
+        openAvailability(data);
+      });
 
-      // Legacy / alternate payment event — must OPEN the ring UI, not auto-join
       const handlePatientPaid = (data: any) => {
         console.log("[DoctorSocket] patient-paid event:", data);
-        if (!isForThisDoctor(data?.doctorUsername || data?.doctor_username, currentDoctorUsername)) {
-          return;
-        }
-        setIncomingCall(buildIncomingCall(data, currentDoctorUsername, "RINGING"));
+        if (!isForThisDoctor(data?.doctorUsername || data?.doctor_username, me)) return;
+        setIncomingCall(buildIncomingCall(data, me, "RINGING"));
       };
       socket.on("patient-paid", handlePatientPaid);
     } catch (err) {
@@ -114,7 +175,7 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
     }
 
     const availabilityChannel = supabase
-      .channel(`doctor_availability_${currentDoctorUsername}`)
+      .channel(`doctor_availability_${me}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "appointments" },
@@ -122,45 +183,36 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
           const appt = payload.new as any;
           if (!appt) return;
 
-          if (
-            !isForThisDoctor(
-              appt.doctor_username || appt.doctor_name,
-              currentDoctorUsername
-            )
-          ) {
+          if (!isForThisDoctor(appt.doctor_username || appt.doctor_name, me)) {
             return;
           }
 
           const callStatus = String(appt.call_status || "").toUpperCase();
           const status = String(appt.status || "").toUpperCase();
 
-          // Pre-payment doctor request
-          if (callStatus === "REQUESTING_DOCTOR") {
-            setAvailabilityRequest({
-              id: String(appt.id),
-              patientName: appt.patient_name || appt.full_name || "Patient",
-              doctorUsername: appt.doctor_username || currentDoctorUsername,
-              callStatus,
-            });
+          if (isRequestingStatus(callStatus)) {
+            openAvailability(appt);
             return;
           }
 
-          // Post-payment ringing — open incoming call modal
           if (callStatus === "RINGING" || callStatus === "CALLING") {
-            setIncomingCall(buildIncomingCall(appt, currentDoctorUsername, callStatus));
+            setIncomingCall(buildIncomingCall(appt, me, callStatus));
             return;
           }
 
-          // Only clear when the call is truly finished / rejected — NOT on IN_PROGRESS from payment
           if (
             callStatus === "ENDED" ||
             callStatus === "DECLINED" ||
             callStatus === "CANCELLED" ||
+            callStatus === "DOCTOR_DECLINED" ||
             status === "COMPLETED" ||
             status === "CANCELLED"
           ) {
             setIncomingCall((prev) =>
               prev && String(prev.appointmentId) === String(appt.id) ? null : prev
+            );
+            setAvailabilityRequest((prev) =>
+              prev && String(prev.id) === String(appt.id) ? null : prev
             );
           }
         }
@@ -168,14 +220,14 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
       .subscribe();
 
     const callsChannel = supabase
-      .channel(`doctor_calls_${currentDoctorUsername}`)
+      .channel(`doctor_calls_${me}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "calls" },
         (payload) => {
           const newCall = payload.new as any;
           if (!newCall) return;
-          if (!isForThisDoctor(newCall.doctor_username, currentDoctorUsername)) return;
+          if (!isForThisDoctor(newCall.doctor_username, me)) return;
 
           const status = String(newCall.status || "").toLowerCase();
           if (
@@ -194,7 +246,7 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
                   primaryComplaint: newCall.primary_complaint,
                   roomId: newCall.room_id,
                 },
-                currentDoctorUsername,
+                me,
                 "RINGING"
               )
             );
@@ -204,6 +256,7 @@ export function useDoctorCallNotifications(currentDoctorUsername: string) {
       .subscribe();
 
     return () => {
+      clearInterval(pendingPoll);
       if (socket) socket.disconnect();
       supabase.removeChannel(availabilityChannel);
       supabase.removeChannel(callsChannel);
