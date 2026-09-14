@@ -6,8 +6,7 @@ import { getStaffRole } from "@/lib/staff-auth";
 import { toast } from "sonner";
 import { Loader2, User, Clock, PhoneCall, Mic, MicOff, Camera, CameraOff, Video as VideoIcon, LayoutDashboard, Send, Paperclip, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { io } from "socket.io-client";
-import { BACKEND_URL } from "@/lib/api/socket-client";
+import { notifyDoctorIncomingCall } from "@/lib/notify-doctor-call";
 
 export const Route = createFileRoute("/appointments/$appointmentId")({
   head: () => ({ meta: [{ title: "Video Consultation — Dr. Amanuel Hospital" }] }),
@@ -146,23 +145,47 @@ function VideoConsultationPage() {
           payment_status: "paid",
           paid_at:        new Date().toISOString(),
           booking_status: "confirmed",
-          status:         "IN_PROGRESS",
-          call_status:    "IN_PROGRESS",
+          status:         "CONFIRMED",
+          call_status:    "RINGING",
           updated_at:     new Date().toISOString(),
         })
         .eq("id", numericId);
 
       if (error) { toast.error(`Payment failed: ${error.message}`); return; }
 
-      // Emit patient-paid socket event to signaling server
+      // Ring the assigned doctor (do not auto-join them — they must accept)
       try {
-        const socket = io(BACKEND_URL);
-        socket.emit('patient-paid', {
+        const { data: appt } = await supabase
+          .from("appointments")
+          .select("patient_name, doctor_username, doctor_id, phone, primary_complaints, reason_for_visit, reason")
+          .eq("id", numericId)
+          .maybeSingle();
+
+        let doctorUsername = (appt?.doctor_username || "").toLowerCase().trim();
+        if (!doctorUsername && appt?.doctor_id) {
+          const { data: staff } = await supabase
+            .from("staff_accounts")
+            .select("username")
+            .or(`id.eq.${appt.doctor_id},username.eq.${appt.doctor_id}`)
+            .maybeSingle();
+          doctorUsername = (staff?.username || "doctor").toLowerCase().trim();
+        }
+        if (!doctorUsername) doctorUsername = "doctor";
+
+        await notifyDoctorIncomingCall({
           appointmentId: String(numericId),
+          doctorUsername,
+          patientName: appt?.patient_name || "Patient",
+          patientPhone: appt?.phone || "",
+          primaryComplaint:
+            appt?.primary_complaints ||
+            appt?.reason_for_visit ||
+            appt?.reason ||
+            "Video Consultation",
+          roomId: `room_${numericId}`,
         });
-        console.log('Emitted patient-paid event post-payment for appointment:', numericId);
       } catch (sErr) {
-        console.warn('Socket emit error:', sErr);
+        console.warn("Socket notify error:", sErr);
       }
 
       toast.success("Payment completed successfully!");

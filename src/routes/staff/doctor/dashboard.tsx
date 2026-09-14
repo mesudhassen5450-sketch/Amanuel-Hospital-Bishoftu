@@ -215,7 +215,9 @@ function DoctorDashboardPage() {
 
         <IncomingCallModal
           open={!!incomingCall}
-          onOpenChange={closeIncomingCall}
+          onOpenChange={(open) => {
+            if (!open) closeIncomingCall();
+          }}
           appointment={incomingCall}
           currentDoctorUsername={doctorUsername || "doctor"}
         />

@@ -5,8 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Lock, CreditCard, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/lib/supabase";
-import { io } from "socket.io-client";
-import { BACKEND_URL } from "@/lib/api/socket-client";
+import { notifyDoctorIncomingCall } from "@/lib/notify-doctor-call";
 
 interface PaymentGateProps {
   onPayment?: () => void;
@@ -55,7 +54,7 @@ export function PaymentGate({ onPayment, onPaymentSuccess, isProcessingPayment =
         // 1. Fetch appointment details to get doctor_username, doctor_id, and patient info
         const { data: appointment, error: fetchError } = await supabase
           .from("appointments")
-          .select("id, patient_id, patient_name, doctor_username, doctor_id")
+          .select("id, patient_id, patient_name, doctor_username, doctor_id, phone, primary_complaints, reason_for_visit, reason")
           .eq("id", appointmentId)
           .single();
 
@@ -75,13 +74,14 @@ export function PaymentGate({ onPayment, onPaymentSuccess, isProcessingPayment =
 
         console.log(`Initiating call for Appointment #${appointment.id} -> Target Doctor: "${doctorUsername}"`);
 
-        // Step A: Update Appointment Payment Status in Supabase to IN_PROGRESS & paid
+        // Step A: Mark paid + RINGING so the doctor gets a ring UI.
+        // Do NOT set call_status IN_PROGRESS yet — that happens when the doctor accepts.
         const { error: apptError } = await supabase
           .from('appointments')
           .update({
             payment_status: 'paid',
-            status: 'IN_PROGRESS',
-            call_status: 'IN_PROGRESS',
+            status: 'CONFIRMED',
+            call_status: 'RINGING',
             booking_status: 'confirmed',
             paid_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -113,16 +113,19 @@ export function PaymentGate({ onPayment, onPaymentSuccess, isProcessingPayment =
 
         console.log('Call record created successfully');
 
-        // Step C: Dispatch socket event 'patient-paid'
-        try {
-          const socket = io(BACKEND_URL);
-          socket.emit('patient-paid', {
-            appointmentId: String(appointment.id),
-          });
-          console.log('[PaymentGate] Emitted patient-paid socket event for appointment:', appointment.id);
-        } catch (socketErr) {
-          console.warn('[PaymentGate] Failed to emit socket event:', socketErr);
-        }
+        // Step C: Ring the doctor over Socket.IO (wait for connect so cold starts don't drop the event)
+        await notifyDoctorIncomingCall({
+          appointmentId: String(appointment.id),
+          doctorUsername,
+          patientName: appointment.patient_name || 'Patient',
+          patientPhone: (appointment as any).phone || '',
+          primaryComplaint:
+            (appointment as any).primary_complaints ||
+            (appointment as any).reason_for_visit ||
+            (appointment as any).reason ||
+            'Video Consultation',
+          roomId,
+        });
 
         // Step D: Trigger parent update / redirect to consultation room
         if (onPaymentSuccess) {

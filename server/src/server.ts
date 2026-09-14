@@ -155,12 +155,67 @@ io.on("connection", (socket) => {
   console.log(`[Socket.IO] Client connected: ${socket.id}`);
 
   // Doctor registration for incoming call notifications
-  socket.on("register-doctor", (data: { doctorUsername?: string; doctorId?: string }) => {
-    const doctorUsername = (data.doctorUsername || data.doctorId || "").toLowerCase().trim();
-    if (doctorUsername) {
-      connectedDoctors.set(doctorUsername, socket.id);
-      console.log(`[Socket.IO] Doctor registered: ${doctorUsername} (${socket.id})`);
+  socket.on("register-doctor", (data: {
+    doctorUsername?: string;
+    doctorId?: string;
+    username?: string;
+  }) => {
+    const doctorUsername = (
+      data.doctorUsername ||
+      data.doctorId ||
+      data.username ||
+      ""
+    )
+      .toLowerCase()
+      .trim();
+    if (!doctorUsername) return;
+
+    connectedDoctors.set(doctorUsername, socket.id);
+    // Join a private room so incoming-call can be routed to this doctor only
+    const roomName = `doctor_${doctorUsername}`;
+    socket.join(roomName);
+    console.log(`[Socket.IO] Doctor registered: ${doctorUsername} → ${roomName} (${socket.id})`);
+    socket.emit("doctor-registered", { success: true, channel: roomName });
+  });
+
+  // Patient → doctor ringing (post-payment). This is what the doctor UI listens for.
+  socket.on("incoming-call", (data: {
+    doctorUsername?: string;
+    doctorId?: string;
+    appointmentId?: string;
+    id?: string;
+    patientName?: string;
+    patientPhone?: string;
+    primaryComplaint?: string;
+    roomId?: string;
+    roomUrl?: string;
+  }) => {
+    const docKey = (data.doctorUsername || data.doctorId || "").toLowerCase().trim();
+    const appointmentId = String(data.appointmentId || data.id || "");
+    const payload = {
+      appointmentId,
+      id: appointmentId,
+      patientName: data.patientName || "Patient",
+      patientPhone: data.patientPhone || "",
+      primaryComplaint: data.primaryComplaint || "Video Consultation",
+      doctorUsername: docKey,
+      roomId: data.roomId || `room_${appointmentId}`,
+      roomUrl: data.roomUrl || `/consultation/room/${appointmentId}`,
+      createdAt: new Date().toISOString(),
+    };
+
+    console.log(`[Socket.IO] incoming-call for doctor="${docKey}" appointment=${appointmentId}`);
+
+    if (docKey) {
+      io.to(`doctor_${docKey}`).emit("incoming-call", payload);
+      const doctorSocketId = connectedDoctors.get(docKey);
+      if (doctorSocketId) {
+        io.to(doctorSocketId).emit("incoming-call", payload);
+      }
     }
+    // Fallback broadcast so a connected doctor UI still receives the ring
+    // even if register-doctor username casing/room join failed.
+    socket.broadcast.emit("incoming-call", payload);
   });
 
   // Join video consultation room
@@ -212,22 +267,56 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("receive-message", payload);
   });
 
-  // Patient paid event
-  socket.on("patient-paid", (data: { appointmentId: string }) => {
-    console.log(`[Socket.IO] Patient paid notification for appointment: ${data.appointmentId}`);
-    io.emit("patient-paid", data);
-  });
+  // Patient paid event — also ring the doctor when username is included
+  socket.on(
+    "patient-paid",
+    (data: {
+      appointmentId: string;
+      doctorUsername?: string;
+      patientName?: string;
+      primaryComplaint?: string;
+      roomId?: string;
+    }) => {
+      console.log(`[Socket.IO] Patient paid for appointment: ${data.appointmentId}`);
+      io.emit("patient-paid", data);
 
-  // Call acceptance & rejection signaling
-  socket.on("accept-call", (data: { appointmentId: string; doctorUsername?: string }) => {
+      const docKey = (data.doctorUsername || "").toLowerCase().trim();
+      if (!docKey || !data.appointmentId) return;
+
+      const payload = {
+        appointmentId: String(data.appointmentId),
+        id: String(data.appointmentId),
+        patientName: data.patientName || "Patient",
+        primaryComplaint: data.primaryComplaint || "Video Consultation",
+        doctorUsername: docKey,
+        roomId: data.roomId || `room_${data.appointmentId}`,
+        roomUrl: `/consultation/room/${data.appointmentId}`,
+        createdAt: new Date().toISOString(),
+      };
+      io.to(`doctor_${docKey}`).emit("incoming-call", payload);
+      const doctorSocketId = connectedDoctors.get(docKey);
+      if (doctorSocketId) {
+        io.to(doctorSocketId).emit("incoming-call", payload);
+      }
+      socket.broadcast.emit("incoming-call", payload);
+    }
+  );
+
+  // Call acceptance & rejection signaling (support both naming styles)
+  const emitAccepted = (data: { appointmentId: string; doctorUsername?: string }) => {
     console.log(`[Socket.IO] Call accepted for appointment: ${data.appointmentId}`);
     io.emit("call-accepted", data);
-  });
-
-  socket.on("decline-call", (data: { appointmentId: string; doctorUsername?: string }) => {
+    io.emit("accept-call", data);
+  };
+  const emitDeclined = (data: { appointmentId: string; doctorUsername?: string }) => {
     console.log(`[Socket.IO] Call declined for appointment: ${data.appointmentId}`);
     io.emit("call-declined", data);
-  });
+    io.emit("decline-call", data);
+  };
+  socket.on("accept-call", emitAccepted);
+  socket.on("call-accepted", emitAccepted);
+  socket.on("decline-call", emitDeclined);
+  socket.on("call-declined", emitDeclined);
 
   // WebRTC P2P Signaling Relays (Offer, Answer, ICE Candidate)
   socket.on("offer", (data: { roomId?: string; room_id?: string; offer: any }) => {

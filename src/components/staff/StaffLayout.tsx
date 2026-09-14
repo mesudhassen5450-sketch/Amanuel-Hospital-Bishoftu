@@ -172,7 +172,9 @@ export function StaffLayout({ children }: { children: ReactNode }) {
       {isDoctor && (
         <IncomingCallModal
           open={!!incomingCall}
-          onOpenChange={closeIncomingCall}
+          onOpenChange={(open) => {
+            if (!open) closeIncomingCall();
+          }}
           appointment={incomingCall}
           currentDoctorUsername={user?.username || "doctor"}
         />

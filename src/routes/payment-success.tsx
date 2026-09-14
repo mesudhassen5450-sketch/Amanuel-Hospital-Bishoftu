@@ -10,6 +10,7 @@ import { addBookingServer } from "@/lib/admin-server";
 import { useLanguage } from "@/lib/language-context";
 import { t } from "@/lib/translations";
 import { supabase } from "@/lib/supabase";
+import { notifyDoctorIncomingCall } from "@/lib/notify-doctor-call";
 
 interface PaymentSuccessSearch {
   tx_ref?: string;
@@ -155,6 +156,20 @@ function PaymentSuccessPage() {
                     })
                     .eq("id", appointmentId);
                 }
+
+                // Always ring the doctor over Socket.IO after payment verification
+                await notifyDoctorIncomingCall({
+                  appointmentId: String(appointmentId),
+                  doctorUsername: String(doctorUsername).toLowerCase().trim(),
+                  patientName: appointmentData.full_name || confirmedBooking.fullName || "Patient",
+                  patientPhone: appointmentData.patient_id || confirmedBooking.phoneNumber || "",
+                  primaryComplaint:
+                    appointmentData.primary_complaints ||
+                    appointmentData.reason_for_visit ||
+                    appointmentData.reason ||
+                    "Video Consultation",
+                  roomId,
+                });
               } catch (callErr) {
                 console.error("Failed to trigger call initiation:", callErr);
               }
