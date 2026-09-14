@@ -6,6 +6,10 @@ export const chatWithAi = createServerFn({ method: "POST" })
     const apiKey = process.env["GROQ_API_KEY"];
     if (!apiKey) throw new Error("GROQ_API_KEY environment variable is not set.");
 
+    // llama-3.3-70b-versatile was retired by Groq (Aug 2026). Prefer env override.
+    const model =
+      process.env["GROQ_MODEL"]?.trim() || "openai/gpt-oss-120b";
+
     const systemPrompt = `You are a friendly, compassionate, and professional AI Assistant for Dr. Amanuel Hospital in Bishoftu (Debre Zeyit), Oromia, Ethiopia. Your role is to help visitors with any question about the hospital — services, doctors, departments, working hours, appointments, careers, location, and general health inquiries.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
@@ -153,7 +157,7 @@ RESPONSE GUIDELINES
           "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "llama-3.3-70b-versatile",
+          model,
           messages,
           temperature: 0.7,
           max_tokens: 512,
