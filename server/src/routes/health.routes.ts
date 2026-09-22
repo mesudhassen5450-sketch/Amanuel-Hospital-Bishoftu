@@ -18,7 +18,9 @@ router.get("/", async (req: Request, res: Response) => {
     dbLatencyMs = Date.now() - dbPingStart;
     dbStatus = "connected";
   } catch (error: any) {
-    dbStatus = `error: ${error.message || "Database connection failed"}`;
+    // Keep details in server logs only — health responses are public
+    console.error("[Health] Database ping failed:", error?.message || error);
+    dbStatus = "error: database unreachable";
   }
 
   const isHealthy = dbStatus === "connected";

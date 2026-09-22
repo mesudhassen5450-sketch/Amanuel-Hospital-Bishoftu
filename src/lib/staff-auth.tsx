@@ -250,6 +250,23 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: result.message || result.error || "Invalid username or password. Please try again." };
       }
 
+      if (response.status === 503) {
+        return {
+          success: false,
+          error:
+            result.message ||
+            "Login is temporarily unavailable (database offline). Please try again in a few minutes.",
+        };
+      }
+
+      const rawErr = String(result.message || result.error || "");
+      if (/prisma|can't reach database|database server/i.test(rawErr)) {
+        return {
+          success: false,
+          error: "Login is temporarily unavailable (database offline). Please try again in a few minutes.",
+        };
+      }
+
       return {
         success: false,
         error: result.message || result.error || "Unable to sign in. Please try again.",

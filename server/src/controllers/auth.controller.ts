@@ -95,7 +95,26 @@ export const login = async (req: Request, res: Response) => {
         });
     } catch (error: any) {
         console.error('Login controller fatal error:', error);
-        return res.status(500).json({ error: error.message || 'Internal server error during login' });
+        const raw = String(error?.message || error || '');
+        // Never leak Prisma / hostnames to the browser
+        if (
+            /can't reach database server/i.test(raw) ||
+            /database server is running/i.test(raw) ||
+            /P1001|P1002|P1017/i.test(raw) ||
+            /ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(raw)
+        ) {
+            return res.status(503).json({
+                success: false,
+                message:
+                    'Login is temporarily unavailable (database offline). Please try again in a few minutes, or contact the hospital IT admin.',
+                error: 'Database unavailable',
+            });
+        }
+        return res.status(500).json({
+            success: false,
+            message: 'Unable to sign in right now. Please try again.',
+            error: 'Internal server error during login',
+        });
     }
 };
 
