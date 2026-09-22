@@ -55,11 +55,27 @@ async function seedDatabase() {
 async function main() {
   try {
     await seedDatabase();
-  } catch (error) {
+  } catch (error: any) {
+    const raw = String(error?.message || error || '');
+    const dbUnreachable =
+      /can't reach database server/i.test(raw) ||
+      /P1001|P1002|P1017/i.test(raw) ||
+      /ECONNREFUSED|ETIMEDOUT|ENOTFOUND/i.test(raw);
+
     console.error('❌ Seeding error:', error);
+
+    // Never fail Render/Netlify builds when Postgres is temporarily offline.
+    // Accounts already exist in production; seed is best-effort bootstrap only.
+    if (dbUnreachable) {
+      console.warn(
+        '⚠️  Database unreachable during seed — continuing build. Fix DATABASE_URL / resume Postgres in Render, then redeploy or run: npm run prisma:seed'
+      );
+      process.exit(0);
+    }
+
     process.exit(1);
   } finally {
-    await prisma.$disconnect();
+    await prisma.$disconnect().catch(() => undefined);
     console.log('👋 Database connection closed');
   }
 }
